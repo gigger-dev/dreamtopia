@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+uploads/
+.dart_tool/
+.flutter-plugins-dependencies
+frontend/build/
+frontend/.idea/
+frontend/android/local.properties
+frontend/ios/Pods/
+frontend/ios/.symlinks/
+*.tsbuildinfo
+.sites-runtime/
+.wrangler/
+.vinext/

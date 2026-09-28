@@ -1,0 +1,164 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+enum Role {
+  ADMIN
+  INSTRUCTOR
+  MEMBER
+}
+enum SessionType {
+  POLE_CLASS
+  TRIAL
+  PRACTICE
+  RENTAL
+}
+enum SessionStatus {
+  PENDING_INSTRUCTOR
+  SCHEDULED
+  CANCELLED
+  COMPLETED
+}
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  CANCELLED
+}
+enum PaymentMethod {
+  BANK_TRANSFER
+  CREDITS
+}
+enum Attendance {
+  UNMARKED
+  PRESENT
+  ABSENT
+}
+model User {
+  id String @id @default(uuid())
+  email String @unique
+  name String
+  passwordHash String
+  role Role @default(MEMBER)
+  credits Int @default(0)
+  createdAt DateTime @default(now())
+  instructor Instructor?
+  bookings Booking[]
+  proofs PaymentProof[]
+  ledger CreditLedger[]
+  notifications Notification[]
+  requests TimeslotRequest[]
+}
+model Instructor {
+  id String @id @default(uuid())
+  userId String? @unique
+  user User? @relation(fields:[userId],references:[id])
+  email String @unique
+  name String
+  bio String @default("")
+  specialty String @default("Pole foundations")
+  autoAccept Boolean @default(false)
+  sessions Session[]
+  blocks UnavailableSlot[]
+}
+model Session {
+  id String @id @default(uuid())
+  title String
+  type SessionType
+  startsAt DateTime
+  endsAt DateTime
+  capacity Int
+  price Int
+  level String @default("All levels")
+  description String @default("")
+  instructorId String?
+  instructor Instructor? @relation(fields:[instructorId],references:[id])
+  status SessionStatus
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  bookings Booking[]
+  @@index([startsAt,status])
+  @@index([instructorId,startsAt])
+}
+model UnavailableSlot {
+  id String @id @default(uuid())
+  instructorId String
+  instructor Instructor @relation(fields:[instructorId],references:[id])
+  startsAt DateTime
+  endsAt DateTime
+  reason String @default("")
+  @@index([instructorId,startsAt])
+}
+model PaymentProof {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  filename String
+  mime String
+  createdAt DateTime @default(now())
+  booking Booking?
+}
+model Booking {
+  id String @id @default(uuid())
+  memberId String
+  member User @relation(fields:[memberId],references:[id])
+  sessionId String
+  session Session @relation(fields:[sessionId],references:[id])
+  status BookingStatus @default(PENDING)
+  paymentMethod PaymentMethod
+  proofId String? @unique
+  proof PaymentProof? @relation(fields:[proofId],references:[id])
+  amount Int
+  discount Int @default(0)
+  promoCode String?
+  creditReserved Boolean @default(false)
+  attendance Attendance @default(UNMARKED)
+  rejectionReason String?
+  createdAt DateTime @default(now())
+  @@index([memberId,status])
+  @@index([sessionId,status])
+}
+model CreditLedger {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  delta Int
+  reason String
+  bookingId String?
+  createdAt DateTime @default(now())
+  @@index([userId,createdAt])
+}
+model Promotion {
+  id String @id @default(uuid())
+  code String @unique
+  percent Int
+  expiresAt DateTime
+  active Boolean @default(true)
+}
+model Notification {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  title String
+  body String
+  readAt DateTime?
+  dedupeKey String? @unique
+  createdAt DateTime @default(now())
+  @@index([userId,createdAt])
+}
+model TimeslotRequest {
+  id String @id @default(uuid())
+  memberId String
+  member User @relation(fields:[memberId],references:[id])
+  type SessionType
+  startsAt DateTime
+  endsAt DateTime
+  note String @default("")
+  status String @default("PENDING")
+  response String?
+  createdAt DateTime @default(now())
+  @@index([memberId,status])
+}
