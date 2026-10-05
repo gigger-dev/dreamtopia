@@ -145,14 +145,16 @@ class StatusBadge extends StatelessWidget {
     final good = ['CONFIRMED', 'SCHEDULED', 'PRESENT', 'COMPLETED', 'REVIEWED', 'ACTIVE']
         .contains(status);
     final bad =
-        ['REJECTED', 'CANCELLED', 'ABSENT', 'DECLINED', 'EXHAUSTED', 'EXPIRED'].contains(status);
+        ['REJECTED', 'CANCELLED', 'ABSENT', 'NO_SHOW', 'DECLINED', 'EXHAUSTED', 'EXPIRED'].contains(status);
     final color = good
         ? const Color(0xFF2E6B42)
         : bad
             ? const Color(0xFF8B3A3A)
             : const Color(0xFF7A6340);
     String text = label(status);
-    if (status == 'PENDING_INSTRUCTOR') {
+    if (status == 'NO_SHOW') {
+      text = 'No-Show';
+    } else if (status == 'PENDING_INSTRUCTOR') {
       text = 'Needs Instructor Confirmation';
     } else if (status == 'SCHEDULED') {
       text = 'Confirmed / Scheduled';

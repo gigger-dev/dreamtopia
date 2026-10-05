@@ -1204,4 +1204,65 @@ export class StudioService {
       skipDuplicates: true,
     });
   }
+
+  @Cron("0 * * * *") // Run hourly to expire past packages (AC15)
+  async expirePackages() {
+    const now = new Date();
+    const expired = await this.db.memberPackage.findMany({
+      where: {
+        status: "ACTIVE",
+        expiresAt: { lte: now },
+      },
+      include: { packageProduct: true },
+    });
+
+    for (const p of expired) {
+      await this.db.serial(async (tx) => {
+        // Transition package to EXPIRED
+        await tx.memberPackage.update({
+          where: { id: p.id },
+          data: { status: "EXPIRED" },
+        });
+
+        // Deduct unused credits from user's current balance
+        if (p.creditsRemaining > 0) {
+          await tx.user.update({
+            where: { id: p.userId },
+            data: { credits: { decrement: p.creditsRemaining } },
+          });
+
+          await tx.creditLedger.create({
+            data: {
+              userId: p.userId,
+              packageId: p.id,
+              delta: -p.creditsRemaining,
+              reason: `Package expired: ${p.packageProduct.name}`,
+            },
+          });
+        }
+
+        await this.notify(
+          tx,
+          p.userId,
+          "Package expired",
+          `Your ${p.packageProduct.name} pass has expired. Unused credits have been removed per studio validity terms.`,
+        );
+      });
+    }
+  }
+
+  @Cron("*/15 * * * *") // Run every 15 minutes to mark ended scheduled sessions as completed
+  async autoCompleteSessions() {
+    const now = new Date();
+    await this.db.session.updateMany({
+      where: {
+        status: "SCHEDULED",
+        endsAt: { lt: now },
+      },
+      data: {
+        status: "COMPLETED",
+      },
+    });
+  }
 }
+
