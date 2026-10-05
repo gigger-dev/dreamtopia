@@ -6,8 +6,13 @@ import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { APP_GUARD } from "@nestjs/core";
 import { AuthController, AuthGuard } from "./auth/auth";
 import { PrismaService } from "./prisma.service";
-import { StudioController } from "./studio/studio.controller";
-import { StudioService } from "./studio/studio.service";
+import { StudioModule } from "./studio/studio.module";
+import { SessionsModule } from "./sessions/sessions.module";
+import { PackagesModule } from "./packages/packages.module";
+import { BookingsModule } from "./bookings/bookings.module";
+import { InstructorsModule } from "./instructors/instructors.module";
+import { NotificationsModule } from "./notifications/notifications.module";
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -22,11 +27,16 @@ import { StudioService } from "./studio/studio.service";
     }),
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 120 }]),
+    StudioModule,
+    SessionsModule,
+    PackagesModule,
+    BookingsModule,
+    InstructorsModule,
+    NotificationsModule,
   ],
-  controllers: [AuthController, StudioController],
+  controllers: [AuthController],
   providers: [
     PrismaService,
-    StudioService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],
