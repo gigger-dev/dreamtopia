@@ -1,5 +1,6 @@
-import { Attendance, PaymentMethod, SessionType } from "@prisma/client";
+import { Attendance, BookingMode, PaymentMethod, SessionType } from "@prisma/client";
 import {
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEmail,
@@ -14,9 +15,12 @@ import {
   MinLength,
   IsIn,
 } from "class-validator";
+
 export class SessionDto {
   @IsString() @MinLength(2) @MaxLength(100) title!: string;
   @IsEnum(SessionType) type!: SessionType;
+  @IsOptional() @IsEnum(BookingMode) bookingMode?: BookingMode;
+  @IsOptional() @IsInt() @Min(1) @Max(20) creditCost?: number;
   @IsDateString() startsAt!: string;
   @IsDateString() endsAt!: string;
   @IsInt() @Min(1) @Max(50) capacity!: number;
@@ -26,11 +30,38 @@ export class SessionDto {
   @IsOptional() @IsUUID() instructorId?: string;
   @IsOptional() @IsBoolean() requireConfirmation?: boolean;
 }
+
 export class BookingDto {
   @IsUUID() sessionId!: string;
   @IsEnum(PaymentMethod) paymentMethod!: PaymentMethod;
   @IsOptional() @IsUUID() proofId?: string;
   @IsOptional() @IsString() @MaxLength(40) promoCode?: string;
+}
+
+export class AdminBookingDto {
+  @IsUUID() memberId!: string;
+  @IsUUID() sessionId!: string;
+  @IsEnum(PaymentMethod) paymentMethod!: PaymentMethod;
+  @IsOptional() @IsUUID() proofId?: string;
+}
+
+export class CancelOverrideDto {
+  @IsString() @MinLength(2) @MaxLength(500) reason!: string;
+}
+
+export class PackageProductDto {
+  @IsString() @MinLength(2) @MaxLength(100) name!: string;
+  @IsOptional() @IsString() @MaxLength(1000) description?: string;
+  @IsInt() @Min(1) @Max(100) credits!: number;
+  @IsInt() @Min(0) @Max(100000000) price!: number;
+  @IsInt() @Min(1) @Max(365) validityDays!: number;
+  @IsOptional() @IsArray() @IsEnum(SessionType, { each: true }) allowedTypes?: SessionType[];
+  @IsOptional() @IsBoolean() active?: boolean;
+}
+
+export class PurchasePackageDto {
+  @IsUUID() packageProductId!: string;
+  @IsUUID() proofId!: string;
 }
 export class InstructorDto {
   @IsString() @MinLength(2) @MaxLength(80) name!: string;

@@ -99,6 +99,17 @@ export class StudioController {
   ) {
     return this.service.cancelBooking(r.user, id);
   }
+  @Roles("ADMIN") @Post("admin/bookings") adminBook(
+    @Body() d: D.AdminBookingDto,
+  ) {
+    return this.service.adminBook(d);
+  }
+  @Roles("ADMIN") @Post("admin/bookings/:id/cancel") cancelBookingOverride(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() d: D.CancelOverrideDto,
+  ) {
+    return this.service.adminCancelBooking(id, d.reason);
+  }
   @Roles("ADMIN") @Post("bookings/:id/approve") approve(
     @Param("id", ParseUUIDPipe) id: string,
   ) {
@@ -170,9 +181,41 @@ export class StudioController {
   ) {
     return this.service.grant(id, d);
   }
+  @Get("packages/products") packageProducts() {
+    return this.service.packageProducts();
+  }
+  @Roles("ADMIN") @Get("admin/packages/products") allPackageProducts() {
+    return this.service.allPackageProducts();
+  }
+  @Roles("ADMIN") @Post("admin/packages/products") createPackageProduct(
+    @Body() d: D.PackageProductDto,
+  ) {
+    return this.service.createPackageProduct(d);
+  }
+  @Roles("MEMBER") @Post("packages/purchase") purchasePackage(
+    @Req() r: AuthRequest,
+    @Body() d: D.PurchasePackageDto,
+  ) {
+    return this.service.purchasePackage(r.user, d);
+  }
+  @Get("packages") memberPackages(@Req() r: AuthRequest) {
+    return this.service.memberPackages(r.user);
+  }
+  @Roles("ADMIN") @Post("packages/:id/approve") approvePackage(
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    return this.service.reviewPackagePurchase(id, true);
+  }
+  @Roles("ADMIN") @Post("packages/:id/reject") rejectPackage(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() d: D.ReasonDto,
+  ) {
+    return this.service.reviewPackagePurchase(id, false, d.reason);
+  }
   @Roles("MEMBER") @Get("credits") ledger(@Req() r: AuthRequest) {
     return this.db.creditLedger.findMany({
       where: { userId: r.user.id },
+      include: { package: { include: { packageProduct: true } } },
       orderBy: { createdAt: "desc" },
       take: 300,
     });

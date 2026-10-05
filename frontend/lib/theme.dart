@@ -142,10 +142,10 @@ class StatusBadge extends StatelessWidget {
   const StatusBadge(this.status, {super.key});
   @override
   Widget build(BuildContext context) {
-    final good = ['CONFIRMED', 'SCHEDULED', 'PRESENT', 'COMPLETED', 'REVIEWED']
+    final good = ['CONFIRMED', 'SCHEDULED', 'PRESENT', 'COMPLETED', 'REVIEWED', 'ACTIVE']
         .contains(status);
     final bad =
-        ['REJECTED', 'CANCELLED', 'ABSENT', 'DECLINED'].contains(status);
+        ['REJECTED', 'CANCELLED', 'ABSENT', 'DECLINED', 'EXHAUSTED', 'EXPIRED'].contains(status);
     final color = good
         ? const Color(0xFF2E6B42)
         : bad
@@ -156,6 +156,10 @@ class StatusBadge extends StatelessWidget {
       text = 'Needs Instructor Confirmation';
     } else if (status == 'SCHEDULED') {
       text = 'Confirmed / Scheduled';
+    } else if (status == 'PAID_AWAITING_RESOLUTION') {
+      text = 'Paid · Awaiting Resolution';
+    } else if (status == 'PENDING_REVIEW') {
+      text = 'Pending Review';
     }
     return Container(
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),

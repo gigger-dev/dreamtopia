@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -42,7 +44,9 @@ class _StudioScreenState extends State<StudioScreen> {
       promos = [],
       requests = [],
       blocks = [],
-      ledger = [];
+      ledger = [],
+      packages = [],
+      packageProducts = [];
   String page = 'Schedule', filter = 'ALL';
   String viewMode = 'WEEK'; // 'WEEK', 'MONTH', 'DAY'
   String? selectedInstructorId;
@@ -115,9 +119,16 @@ class _StudioScreenState extends State<StudioScreen> {
         'sessions?$rangeQuery',
         'bookings',
         'notifications',
-        if (admin) ...['instructors', 'members', 'promotions', 'requests'],
+        if (admin) ...[
+          'instructors',
+          'members',
+          'promotions',
+          'requests',
+          'packages',
+          'admin/packages/products'
+        ],
         if (teacher) 'instructor/blocks',
-        if (member) ...['requests', 'credits']
+        if (member) ...['requests', 'credits', 'packages', 'packages/products']
       ];
       final values = await Future.wait(paths.map((p) => api.call(p)));
       if (!mounted || version != loadVersion) return;
@@ -130,11 +141,15 @@ class _StudioScreenState extends State<StudioScreen> {
           members = values[4] as List;
           promos = values[5] as List;
           requests = values[6] as List;
+          packages = values[7] as List;
+          packageProducts = values[8] as List;
         }
         if (teacher) blocks = values[3] as List;
         if (member) {
           requests = values[3] as List;
           ledger = values[4] as List;
+          packages = values[5] as List;
+          packageProducts = values[6] as List;
         }
         error = null;
         loading = false;
@@ -198,11 +213,20 @@ class _StudioScreenState extends State<StudioScreen> {
         const FieldSpec('title', 'Session name'),
         const FieldSpec('type', 'Session type',
             initial: 'POLE_CLASS', options: sessionTypes),
+        const FieldSpec('bookingMode', 'Allowed booking modes',
+            initial: 'BOTH',
+            options: {
+              'BOTH': 'Both (Package credits or Walk-in)',
+              'PACKAGE_ONLY': 'Package credits only',
+              'WALK_IN_ONLY': 'Walk-in only (Bank transfer)'
+            }),
+        const FieldSpec('creditCost', 'Credit cost (for package booking)',
+            number: true, initial: '1'),
         const FieldSpec('startsAt', 'Starts at', dateTime: true),
         const FieldSpec('endsAt', 'Ends at', dateTime: true),
         const FieldSpec('capacity', 'Number of places',
             number: true, initial: '6'),
-        FieldSpec('price', 'Price (${settings['currency']})',
+        FieldSpec('price', 'Walk-in Price (${settings['currency']})',
             number: true, initial: '35000'),
         const FieldSpec('level', 'Level', initial: 'All levels'),
         FieldSpec('instructorId', 'Instructor (required for classes)',
@@ -238,6 +262,7 @@ class _StudioScreenState extends State<StudioScreen> {
   List<(String, IconData)> get menu => [
         ('Schedule', Icons.calendar_month_outlined),
         ('Bookings', Icons.confirmation_number_outlined),
+        if (member || admin) ('Packages', Icons.card_membership_outlined),
         if (member) ('My practice', Icons.self_improvement),
         if (admin) ...[
           ('Instructors', Icons.people_outline),
@@ -333,6 +358,7 @@ class _StudioScreenState extends State<StudioScreen> {
                               switch (page) {
                                 'Schedule' => schedule(),
                                 'Bookings' => bookingList(),
+                                'Packages' => packagesSection(),
                                 'My practice' => practice(),
                                 'Instructors' => instructorList(),
                                 'Members' => memberList(),
@@ -539,7 +565,9 @@ class _StudioScreenState extends State<StudioScreen> {
     final filtered = sessions.where((s) {
       if (filter != 'ALL' && s['type'] != filter) return false;
       if (selectedInstructorId != null &&
-          s['instructor']?['id'] != selectedInstructorId) return false;
+          s['instructor']?['id'] != selectedInstructorId) {
+        return false;
+      }
       if (searchQuery.isNotEmpty) {
         final q = searchQuery.toLowerCase();
         final title = (s['title'] as String? ?? '').toLowerCase();
@@ -548,7 +576,9 @@ class _StudioScreenState extends State<StudioScreen> {
         final desc = (s['description'] as String? ?? '').toLowerCase();
         if (!title.contains(q) &&
             !instructorName.contains(q) &&
-            !desc.contains(q)) return false;
+            !desc.contains(q)) {
+          return false;
+        }
       }
       return true;
     }).toList();
@@ -625,26 +655,39 @@ class _StudioScreenState extends State<StudioScreen> {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(children: [
-                      const Icon(Icons.tune_outlined, color: plum, size: 20),
-                      const SizedBox(width: 8),
-                      const Text('Advanced Search & Filters',
-                          style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold)),
-                      const Spacer(),
-                      if (searchQuery.isNotEmpty ||
-                          filter != 'ALL' ||
-                          selectedInstructorId != null)
-                        TextButton.icon(
-                            onPressed: () => setState(() {
-                                  searchQuery = '';
-                                  searchController.clear();
-                                  filter = 'ALL';
-                                  selectedInstructorId = null;
-                                }),
-                            icon: const Icon(Icons.clear_all, size: 16),
-                            label: const Text('Reset filters'))
-                    ]),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.tune_outlined, color: plum, size: 20),
+                            SizedBox(width: 8),
+                            Flexible(
+                              child: Text('Search & Filters',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 16, fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                        if (searchQuery.isNotEmpty ||
+                            filter != 'ALL' ||
+                            selectedInstructorId != null)
+                          TextButton.icon(
+                              onPressed: () => setState(() {
+                                    searchQuery = '';
+                                    searchController.clear();
+                                    filter = 'ALL';
+                                    selectedInstructorId = null;
+                                  }),
+                              icon: const Icon(Icons.clear_all, size: 16),
+                              label: const Text('Reset filters')),
+                      ],
+                    ),
                     const SizedBox(height: 14),
                     Wrap(spacing: 14, runSpacing: 14, children: [
                       SizedBox(
@@ -735,40 +778,51 @@ class _StudioScreenState extends State<StudioScreen> {
       const SizedBox(height: 14),
 
       // Date Header & Stepper
-      Card(
-          child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(children: [
-                Expanded(
-                    child: Text(
-                        switch (viewMode) {
-                          'MONTH' => DateFormat('MMMM yyyy').format(week),
-                          'DAY' => DateFormat('EEEE, d MMMM yyyy')
-                              .format(selectedDate),
-                          _ =>
-                            '${DateFormat('d MMM').format(week)} – ${DateFormat('d MMM yyyy').format(week.add(const Duration(days: 6)))}'
-                        },
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 16))),
-                IconButton(
-                    onPressed: () => changePeriod(-1),
-                    icon: const Icon(Icons.chevron_left),
-                    tooltip: 'Previous'),
-                TextButton(
-                    onPressed: () {
-                      final today = tz.TZDateTime.now(zone);
-                      selectedDate =
-                          DateTime(today.year, today.month, today.day);
-                      week = selectedDate
-                          .subtract(Duration(days: today.weekday - 1));
-                      load();
-                    },
-                    child: const Text('Today')),
-                IconButton(
-                    onPressed: () => changePeriod(1),
-                    icon: const Icon(Icons.chevron_right),
-                    tooltip: 'Next')
-              ]))),
+      SizedBox(
+        width: double.infinity,
+        child: Card(
+            child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Wrap(
+                    spacing: 12,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                          switch (viewMode) {
+                            'MONTH' => DateFormat('MMMM yyyy').format(week),
+                            'DAY' => DateFormat('EEEE, d MMMM yyyy')
+                                .format(selectedDate),
+                            _ =>
+                              '${DateFormat('d MMM').format(week)} – ${DateFormat('d MMM yyyy').format(week.add(const Duration(days: 6)))}'
+                          },
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 16)),
+                      Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                                onPressed: () => changePeriod(-1),
+                                icon: const Icon(Icons.chevron_left),
+                                tooltip: 'Previous'),
+                            TextButton(
+                                onPressed: () {
+                                  final today = tz.TZDateTime.now(zone);
+                                  selectedDate =
+                                      DateTime(today.year, today.month, today.day);
+                                  week = selectedDate
+                                      .subtract(Duration(days: today.weekday - 1));
+                                  load();
+                                },
+                                child: const Text('Today')),
+                            IconButton(
+                                onPressed: () => changePeriod(1),
+                                icon: const Icon(Icons.chevron_right),
+                                tooltip: 'Next'),
+                          ]),
+                    ]))),
+      ),
       const SizedBox(height: 16),
 
       // Active Calendar View
@@ -1176,6 +1230,24 @@ class _StudioScreenState extends State<StudioScreen> {
                                             submit: 'Reject booking'),
                                     child: const Text('Reject'))
                               ],
+                              if (admin &&
+                                  ['PENDING', 'CONFIRMED', 'PAID_AWAITING_RESOLUTION']
+                                      .contains(b['status']))
+                                OutlinedButton(
+                                    onPressed: busy
+                                        ? null
+                                        : () => form(
+                                            'Cancel Booking (Admin Override)',
+                                            const [
+                                              FieldSpec('reason',
+                                                  'Audit reason for override cancellation',
+                                                  multiline: true)
+                                            ],
+                                            'admin/bookings/${b['id']}/cancel',
+                                            submit: 'Cancel booking',
+                                            note:
+                                                'Admin override cancellation releases the seat and restores member credits regardless of 24h cutoff.'),
+                                    child: const Text('Admin Cancel')),
                               if (member &&
                                   ['PENDING', 'CONFIRMED']
                                       .contains(b['status']))
@@ -1631,4 +1703,330 @@ class _StudioScreenState extends State<StudioScreen> {
                               method: 'PATCH', success: 'Marked as read')
                           : null)))
       ]);
+
+  // --- Package Catalog & Management (SBQS_V1 FR02, FR04, FR10, AC03) ---
+
+  Future<void> purchasePackageFlow(Map<String, dynamic> product) async {
+    Uint8List? proofBytes;
+    String? proofFilename;
+    String? dialogError;
+    bool dialogBusy = false;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          title: Text('Purchase ${product['name']}'),
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: sageLight,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: sageBorder),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${product['credits']} Class Credits',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Price: ${money(product['price'])} · Valid for ${product['validityDays']} days after studio approval.',
+                          style: const TextStyle(fontSize: 13, color: muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    settings['bankInstructions']?.toString() ??
+                        'Please transfer to studio bank account and upload screenshot.',
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 18),
+                  OutlinedButton.icon(
+                    onPressed: dialogBusy
+                        ? null
+                        : () async {
+                            try {
+                              final result = await FilePicker.platform.pickFiles(
+                                type: FileType.custom,
+                                allowedExtensions: ['png', 'jpg', 'jpeg', 'webp'],
+                                withData: true,
+                              );
+                              if (result == null) return;
+                              final file = result.files.single;
+                              if (file.size > 5 * 1024 * 1024 || file.bytes == null) {
+                                throw ApiException('Choose an image smaller than 5 MB.');
+                              }
+                              setDlgState(() {
+                                proofBytes = file.bytes;
+                                proofFilename = file.name;
+                                dialogError = null;
+                              });
+                            } catch (e) {
+                              setDlgState(() => dialogError = e.toString());
+                            }
+                          },
+                    icon: const Icon(Icons.upload_file_outlined),
+                    label: Text(proofFilename ?? 'Upload payment screenshot'),
+                  ),
+                  const Text('PNG, JPEG or WebP · up to 5 MB',
+                      style: TextStyle(fontSize: 12, color: muted)),
+                  if (proofBytes != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: Image.memory(
+                          proofBytes!,
+                          height: 140,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  if (dialogError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 14),
+                      child: Text(dialogError!,
+                          style: const TextStyle(color: Colors.red)),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: dialogBusy ? null : () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: dialogBusy
+                  ? null
+                  : () async {
+                      if (proofBytes == null) {
+                        setDlgState(() =>
+                            dialogError = 'Please upload your payment screenshot first.');
+                        return;
+                      }
+                      setDlgState(() {
+                        dialogBusy = true;
+                        dialogError = null;
+                      });
+                      try {
+                        final proofId =
+                            await api.upload(proofBytes!, proofFilename!);
+                        await api.call('packages/purchase', method: 'POST', body: {
+                          'packageProductId': product['id'],
+                          'proofId': proofId,
+                        });
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        await load();
+                        message('Package purchase submitted for studio review!');
+                      } catch (e) {
+                        setDlgState(() {
+                          dialogBusy = false;
+                          dialogError = e.toString();
+                        });
+                      }
+                    },
+              child: Text(dialogBusy ? 'Submitting…' : 'Submit payment'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget packagesSection() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          heading(
+            'PACKAGES & PASSES',
+            admin ? 'Studio class packages.' : 'Class packages & passes.',
+            admin
+                ? 'Manage catalog offerings and review member package purchases.'
+                : 'Purchase bundled class credits or view your package status.',
+            button: admin
+                ? FilledButton.icon(
+                    onPressed: () => form(
+                      'Create Package Product',
+                      const [
+                        FieldSpec('name', 'Package name (e.g. 8-Class Flow Pass)'),
+                        FieldSpec('description', 'Description (optional)',
+                            multiline: true, optional: true),
+                        FieldSpec('credits', 'Number of credits (e.g. 4 or 8)',
+                            number: true, initial: '4'),
+                        FieldSpec('price', 'Price in MMK',
+                            number: true, initial: '90000'),
+                        FieldSpec('validityDays', 'Validity in days (e.g. 30, 60)',
+                            number: true, initial: '30'),
+                      ],
+                      'admin/packages/products',
+                    ),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Create package'),
+                  )
+                : null,
+          ),
+
+          // Available Package Products
+          Text('Available Packages',
+              style: GoogleFonts.cinzel(
+                  fontSize: 20, fontWeight: FontWeight.w600, color: ink)),
+          const SizedBox(height: 14),
+          if (packageProducts.isEmpty)
+            empty('No packages currently offered.', Icons.card_membership_outlined),
+          for (final p in packageProducts)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(p['name'] as String,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600, fontSize: 18)),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${p['credits']} credits · ${money(p['price'])} · Valid ${p['validityDays']} days',
+                              style: const TextStyle(color: plum, fontWeight: FontWeight.w600),
+                            ),
+                            if (p['description'] != null &&
+                                (p['description'] as String).isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Text(p['description'] as String,
+                                  style: const TextStyle(color: muted, fontSize: 13)),
+                            ],
+                          ],
+                        ),
+                      ),
+                      if (member)
+                        FilledButton(
+                          onPressed: busy ? null : () => purchasePackageFlow(p),
+                          child: const Text('Buy Package'),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          const SizedBox(height: 32),
+
+          // Member Packages / Purchases Queue
+          Text(
+            admin ? 'Member Package Purchases' : 'My Purchased Packages',
+            style: GoogleFonts.cinzel(
+                fontSize: 20, fontWeight: FontWeight.w600, color: ink),
+          ),
+          const SizedBox(height: 14),
+          if (packages.isEmpty)
+            empty(
+                admin
+                    ? 'No package orders submitted yet.'
+                    : 'You haven’t bought any packages yet.',
+                Icons.receipt_outlined),
+          for (final mp in packages)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(spacing: 12, runSpacing: 8, children: [
+                        Text(
+                          mp['packageProduct']?['name']?.toString() ?? 'Class Package',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 18),
+                        ),
+                        StatusBadge(mp['status'] as String),
+                      ]),
+                      const SizedBox(height: 10),
+                      if (admin && mp['user'] != null)
+                        Text('Member: ${mp['user']['name']} (${mp['user']['email']})',
+                            style: const TextStyle(color: muted, fontSize: 14)),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Credits: ${mp['creditsRemaining']} / ${mp['creditsTotal']} remaining · Paid: ${money(mp['pricePaid'])}',
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                      if (mp['expiresAt'] != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Expires: ${when(mp['expiresAt'])}',
+                          style: const TextStyle(color: muted, fontSize: 13),
+                        ),
+                      ],
+                      if (mp['rejectionReason'] != null) ...[
+                        const SizedBox(height: 6),
+                        Text('Rejection reason: ${mp['rejectionReason']}',
+                            style: const TextStyle(color: Colors.red, fontSize: 13)),
+                      ],
+                      const SizedBox(height: 14),
+                      Wrap(spacing: 8, runSpacing: 8, children: [
+                        if (mp['proofId'] != null)
+                          OutlinedButton.icon(
+                            onPressed: () => viewProof(mp['proofId'] as String),
+                            icon: const Icon(Icons.receipt_long_outlined, size: 17),
+                            label: const Text('Payment proof'),
+                          ),
+                        if (admin && mp['status'] == 'PENDING_REVIEW') ...[
+                          FilledButton(
+                            onPressed: busy
+                                ? null
+                                : () async {
+                                    if (await confirm(
+                                      context,
+                                      'Activate package?',
+                                      'Confirm that you verified payment against bank records. Approving will activate the package and grant ${mp['creditsTotal']} credits to ${mp['user']?['name']}.',
+                                    )) {
+                                      await action(
+                                        'packages/${mp['id']}/approve',
+                                        success: 'Package activated and credits issued!',
+                                      );
+                                    }
+                                  },
+                            child: const Text('Approve & Activate'),
+                          ),
+                          OutlinedButton(
+                            onPressed: busy
+                                ? null
+                                : () => form(
+                                      'Reject package purchase',
+                                      const [
+                                        FieldSpec('reason', 'Reason for rejection',
+                                            multiline: true)
+                                      ],
+                                      'packages/${mp['id']}/reject',
+                                      submit: 'Reject package',
+                                    ),
+                            child: const Text('Reject'),
+                          ),
+                        ],
+                      ]),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
 }

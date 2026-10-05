@@ -32,6 +32,15 @@ class _BookingDialogState extends State<BookingDialog> {
   void initState() {
     super.initState();
     amount = widget.session['price'] as int;
+    final mode = widget.session['bookingMode'] ?? 'BOTH';
+    final creditCost = (widget.session['creditCost'] as int?) ?? 1;
+    if (mode == 'PACKAGE_ONLY') {
+      method = 'CREDITS';
+    } else if (mode == 'WALK_IN_ONLY') {
+      method = 'BANK_TRANSFER';
+    } else {
+      method = (widget.credits >= creditCost) ? 'CREDITS' : 'BANK_TRANSFER';
+    }
   }
 
   @override
@@ -88,6 +97,20 @@ class _BookingDialogState extends State<BookingDialog> {
   }
 
   Future<void> book() async {
+    final mode = widget.session['bookingMode'] ?? 'BOTH';
+    final creditCost = (widget.session['creditCost'] as int?) ?? 1;
+    if (method == 'CREDITS' && mode == 'WALK_IN_ONLY') {
+      setState(() => error = 'This class is walk-in only.');
+      return;
+    }
+    if (method == 'BANK_TRANSFER' && mode == 'PACKAGE_ONLY') {
+      setState(() => error = 'This class accepts package credits only.');
+      return;
+    }
+    if (method == 'CREDITS' && widget.credits < creditCost) {
+      setState(() => error = 'Insufficient class credits (requires $creditCost).');
+      return;
+    }
     if (method == 'BANK_TRANSFER' && bytes == null) {
       setState(() => error = 'Upload your payment screenshot first.');
       return;
@@ -157,10 +180,14 @@ class _BookingDialogState extends State<BookingDialog> {
                                 const Icon(Icons.schedule,
                                     size: 16, color: muted),
                                 const SizedBox(width: 6),
-                                Text(
-                                    '${DateFormat('EEE, d MMM · HH:mm').format(DateTime.parse(widget.session['startsAt'] as String))} – ${DateFormat('HH:mm').format(DateTime.parse(widget.session['endsAt'] as String))}',
-                                    style: const TextStyle(
-                                        fontSize: 13, color: muted)),
+                                Expanded(
+                                  child: Text(
+                                      widget.session['startsAt'] != null && widget.session['endsAt'] != null
+                                          ? '${DateFormat('EEE, d MMM · HH:mm').format(DateTime.parse(widget.session['startsAt'] as String))} – ${DateFormat('HH:mm').format(DateTime.parse(widget.session['endsAt'] as String))}'
+                                          : 'Schedule time confirmed upon booking',
+                                      style: const TextStyle(
+                                          fontSize: 13, color: muted)),
+                                ),
                               ]),
                             ])),
                     const SizedBox(height: 14),
@@ -171,19 +198,21 @@ class _BookingDialogState extends State<BookingDialog> {
                       const SizedBox(height: 14),
                     ],
                     DropdownButtonFormField<String>(
-                        initialValue: method,
+                        value: method,
+                        isExpanded: true,
                         decoration:
-                            const InputDecoration(labelText: 'Payment method'),
+                            const InputDecoration(labelText: 'Funding method'),
                         items: [
-                          const DropdownMenuItem(
-                              value: 'BANK_TRANSFER',
-                              child: Text('Bank transfer')),
-                          if (widget.session['type'] == 'POLE_CLASS' &&
-                              widget.credits > 0)
+                          if ((widget.session['bookingMode'] ?? 'BOTH') != 'PACKAGE_ONLY')
+                            const DropdownMenuItem(
+                                value: 'BANK_TRANSFER',
+                                child: Text('Walk-in (Bank transfer)', overflow: TextOverflow.ellipsis)),
+                          if ((widget.session['bookingMode'] ?? 'BOTH') != 'WALK_IN_ONLY')
                             DropdownMenuItem(
                                 value: 'CREDITS',
                                 child: Text(
-                                    'Class credit · ${widget.credits} remaining'))
+                                    'Package credit (${(widget.session['creditCost'] as int?) ?? 1} credit${((widget.session['creditCost'] as int?) ?? 1) > 1 ? 's' : ''}) · ${widget.credits} available',
+                                    overflow: TextOverflow.ellipsis)),
                         ],
                         onChanged:
                             busy ? null : (v) => setState(() => method = v!)),
@@ -229,8 +258,8 @@ class _BookingDialogState extends State<BookingDialog> {
                                     errorBuilder: (_, __, ___) => const Text(
                                         'Preview unavailable. Select a valid image.')))),
                     ] else
-                      const Text(
-                          'One class credit will be reserved now. It is returned if the studio rejects your booking or you cancel more than 24 hours before class.'),
+                      Text(
+                          '${(widget.session['creditCost'] as int?) ?? 1} class credit${((widget.session['creditCost'] as int?) ?? 1) > 1 ? 's' : ''} will be reserved from your package. It is returned if the studio rejects your booking or you cancel strictly > 24 hours before class.'),
                     const SizedBox(height: 18),
                     const Text(
                         'Your booking is pending until the studio confirms it. Member cancellations must be more than 24 hours before the session.',

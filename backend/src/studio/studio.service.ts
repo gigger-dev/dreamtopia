@@ -120,7 +120,7 @@ export class StudioService {
         throw new ConflictException(
           "The studio already has a session at that time.",
         );
-      const { requireConfirmation, ...sessionData } = d;
+      const { requireConfirmation, bookingMode, creditCost, ...sessionData } = d;
       const needsConfirmation =
         i &&
         (requireConfirmation !== undefined
@@ -129,6 +129,8 @@ export class StudioService {
       const session = await tx.session.create({
         data: {
           ...sessionData,
+          bookingMode: bookingMode ?? "BOTH",
+          creditCost: creditCost ?? 1,
           ...w,
           capacity: d.type === "RENTAL" ? 1 : d.capacity,
           status: needsConfirmation ? "PENDING_INSTRUCTOR" : "SCHEDULED",
@@ -161,16 +163,32 @@ export class StudioService {
   }
   private async restoreCredit(
     tx: Tx,
-    b: { id: string; memberId: string; creditReserved: boolean },
+    b: { id: string; memberId: string; creditReserved: boolean; packageId?: string | null; creditsUsed?: number },
     reason: string,
   ) {
     if (!b.creditReserved) return;
+    const creditsToRestore = b.creditsUsed && b.creditsUsed > 0 ? b.creditsUsed : 1;
     await tx.user.update({
       where: { id: b.memberId },
-      data: { credits: { increment: 1 } },
+      data: { credits: { increment: creditsToRestore } },
     });
+    if (b.packageId) {
+      await tx.memberPackage.update({
+        where: { id: b.packageId },
+        data: {
+          creditsRemaining: { increment: creditsToRestore },
+          status: "ACTIVE", // revert from EXHAUSTED if it was exhausted
+        },
+      });
+    }
     await tx.creditLedger.create({
-      data: { userId: b.memberId, delta: 1, reason, bookingId: b.id },
+      data: {
+        userId: b.memberId,
+        packageId: b.packageId ?? null,
+        delta: creditsToRestore,
+        reason,
+        bookingId: b.id,
+      },
     });
   }
   async cancelSession(id: string, remove: boolean) {
@@ -281,10 +299,10 @@ export class StudioService {
       )
         throw new ConflictException("You have another booking at this time.");
       const credit = d.paymentMethod === "CREDITS";
-      if (credit && s.type !== "POLE_CLASS")
-        throw new BadRequestException(
-          "Class credits apply only to pole classes.",
-        );
+      if (credit && s.bookingMode === "WALK_IN_ONLY")
+        throw new BadRequestException("This class accepts walk-in bank transfer only.");
+      if (!credit && s.bookingMode === "PACKAGE_ONLY")
+        throw new BadRequestException("This class is package-credits only.");
       if (credit && d.promoCode)
         throw new BadRequestException(
           "A promotion cannot be used with a class credit.",
@@ -306,27 +324,71 @@ export class StudioService {
         const proof = d.proofId
           ? await tx.paymentProof.findUnique({
               where: { id: d.proofId },
-              include: { booking: true },
+              include: { booking: true, memberPackage: true },
             })
           : null;
-        if (!proof || proof.userId !== a.id || proof.booking)
+        if (!proof || proof.userId !== a.id || proof.booking || proof.memberPackage)
           throw new BadRequestException(
             "Upload an unused payment screenshot owned by your account.",
           );
       }
+      let sourcePackageId: string | null = null;
+      const creditCost = s.creditCost ?? 1;
       if (credit) {
-        const changed = await tx.user.updateMany({
-          where: { id: a.id, credits: { gte: 1 } },
-          data: { credits: { decrement: 1 } },
+        // Find active package with earliest expiry (FIFO) that allows this session type
+        const now = new Date();
+        const availablePackages = await tx.memberPackage.findMany({
+          where: {
+            userId: a.id,
+            status: "ACTIVE",
+            creditsRemaining: { gte: creditCost },
+            OR: [
+              { expiresAt: null },
+              { expiresAt: { gt: now } },
+            ],
+            packageProduct: {
+              allowedTypes: { has: s.type },
+            },
+          },
+          orderBy: [
+            { expiresAt: "asc" },
+            { createdAt: "asc" },
+          ],
+          take: 1,
         });
-        if (changed.count !== 1)
-          throw new BadRequestException("No class credits remaining.");
+
+        if (availablePackages.length > 0) {
+          const pkg = availablePackages[0];
+          sourcePackageId = pkg.id;
+          const remaining = pkg.creditsRemaining - creditCost;
+          await tx.memberPackage.update({
+            where: { id: pkg.id },
+            data: {
+              creditsRemaining: remaining,
+              status: remaining === 0 ? "EXHAUSTED" : "ACTIVE",
+            },
+          });
+          await tx.user.update({
+            where: { id: a.id },
+            data: { credits: { decrement: creditCost } },
+          });
+        } else {
+          // Fallback to legacy/direct user.credits if sufficient
+          const changed = await tx.user.updateMany({
+            where: { id: a.id, credits: { gte: creditCost } },
+            data: { credits: { decrement: creditCost } },
+          });
+          if (changed.count !== 1)
+            throw new BadRequestException("Insufficient eligible class credits.");
+        }
       }
       const b = await tx.booking.create({
         data: {
           memberId: a.id,
           sessionId: s.id,
           paymentMethod: d.paymentMethod,
+          packageId: sourcePackageId,
+          creditsUsed: credit ? creditCost : 0,
           proofId: credit ? null : d.proofId,
           amount: credit ? 0 : amount,
           discount: credit ? 0 : discount,
@@ -338,7 +400,8 @@ export class StudioService {
         await tx.creditLedger.create({
           data: {
             userId: a.id,
-            delta: -1,
+            packageId: sourcePackageId,
+            delta: -creditCost,
             reason: "Reserved for " + s.title,
             bookingId: b.id,
           },
@@ -397,21 +460,86 @@ export class StudioService {
           "This session is no longer open for confirmation.",
         );
       if (!approve) await this.restoreCredit(tx, b, "Booking rejected");
+
+      // Per spec: recheck session capacity on walk-in approval.
+      // If session filled up while proof was pending, mark PAID_AWAITING_RESOLUTION.
+      let finalStatus: "CONFIRMED" | "REJECTED" | "PAID_AWAITING_RESOLUTION" =
+        approve ? "CONFIRMED" : "REJECTED";
+
+      if (approve) {
+        const confirmedCount = await tx.booking.count({
+          where: {
+            sessionId: b.sessionId,
+            status: "CONFIRMED",
+            id: { not: b.id },
+          },
+        });
+        if (confirmedCount >= b.session.capacity) {
+          finalStatus = "PAID_AWAITING_RESOLUTION";
+        }
+      }
+
       const result = await tx.booking.update({
         where: { id },
         data: {
-          status: approve ? "CONFIRMED" : "REJECTED",
+          status: finalStatus,
           rejectionReason: approve ? null : reason,
-          creditReserved: approve ? b.creditReserved : false,
+          creditReserved: approve && finalStatus === "CONFIRMED" ? b.creditReserved : false,
+        },
+      });
+
+      let noticeTitle = "Booking confirmed";
+      let noticeBody = `${b.session.title} — see you in the studio!`;
+      if (!approve) {
+        noticeTitle = "Booking rejected";
+        noticeBody = `${b.session.title}: ${reason}`;
+      } else if (finalStatus === "PAID_AWAITING_RESOLUTION") {
+        noticeTitle = "Payment verified — session full";
+        noticeBody = `Payment for ${b.session.title} was verified, but the session reached full capacity. The studio will contact you to reschedule or refund.`;
+      }
+
+      await this.notify(tx, b.memberId, noticeTitle, noticeBody);
+      return result;
+    });
+  }
+  async adminCancelBooking(id: string, reason: string) {
+    return this.db.serial(async (tx) => {
+      const b = await tx.booking.findUnique({
+        where: { id },
+        include: { session: true },
+      });
+      if (!b) throw new NotFoundException();
+      if (!["PENDING", "CONFIRMED", "PAID_AWAITING_RESOLUTION"].includes(b.status))
+        throw new BadRequestException("This booking is not active.");
+      await this.restoreCredit(tx, b, `Admin cancelled: ${reason}`);
+      const r = await tx.booking.update({
+        where: { id },
+        data: {
+          status: "CANCELLED",
+          creditReserved: false,
+          overrideReason: reason,
         },
       });
       await this.notify(
         tx,
         b.memberId,
-        approve ? "Booking confirmed" : "Booking rejected",
-        `${b.session.title}${approve ? " — see you in the studio!" : ": " + reason}`,
+        "Booking cancelled by studio",
+        `${b.session.title} was cancelled by administrator. Reason: ${reason}.${b.paymentMethod === "CREDITS" ? " Your credit was restored." : " Contact the studio about your refund."}`,
       );
-      return result;
+      return r;
+    });
+  }
+  async adminBook(d: D.AdminBookingDto) {
+    return this.db.serial(async (tx) => {
+      const member = await tx.user.findUnique({ where: { id: d.memberId } });
+      if (!member || member.role !== "MEMBER")
+        throw new BadRequestException("Selected user is not a member.");
+      const actor: Actor = { id: member.id, role: "MEMBER", email: member.email, name: member.name };
+      return this.book(actor, {
+        sessionId: d.sessionId,
+        paymentMethod: d.paymentMethod,
+        proofId: d.proofId,
+      });
     });
   }
   async cancelBooking(a: Actor, id: string) {
@@ -576,6 +704,165 @@ export class StudioService {
         `${d.amount} credits added: ${d.reason}`,
       );
       return { ok: true };
+    });
+  }
+
+  // --- Package Products and Member Purchases (SBQS_V1 FR02, FR04, FR10, AC03) ---
+
+  async packageProducts() {
+    return this.db.packageProduct.findMany({
+      where: { active: true },
+      orderBy: { price: "asc" },
+    });
+  }
+
+  async allPackageProducts() {
+    return this.db.packageProduct.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async createPackageProduct(d: D.PackageProductDto) {
+    return this.db.packageProduct.create({
+      data: {
+        name: d.name,
+        description: d.description ?? "",
+        credits: d.credits,
+        price: d.price,
+        validityDays: d.validityDays,
+        allowedTypes: d.allowedTypes ?? ["POLE_CLASS"],
+        active: d.active ?? true,
+      },
+    });
+  }
+
+  async purchasePackage(a: Actor, d: D.PurchasePackageDto) {
+    return this.db.serial(async (tx) => {
+      const product = await tx.packageProduct.findUnique({
+        where: { id: d.packageProductId },
+      });
+      if (!product || !product.active)
+        throw new BadRequestException("This package product is not available.");
+
+      const proof = await tx.paymentProof.findUnique({
+        where: { id: d.proofId },
+        include: { booking: true, memberPackage: true },
+      });
+      if (!proof || proof.userId !== a.id || proof.booking || proof.memberPackage)
+        throw new BadRequestException(
+          "Upload an unused payment screenshot owned by your account.",
+        );
+
+      const mp = await tx.memberPackage.create({
+        data: {
+          userId: a.id,
+          packageProductId: product.id,
+          creditsTotal: product.credits,
+          creditsRemaining: product.credits,
+          pricePaid: product.price,
+          status: "PENDING_REVIEW",
+          proofId: d.proofId,
+        },
+      });
+
+      await this.notify(
+        tx,
+        a.id,
+        "Package order received",
+        `Your order for ${product.name} is waiting for studio verification.`,
+      );
+
+      const admins = await tx.user.findMany({ where: { role: "ADMIN" } });
+      for (const admin of admins) {
+        await this.notify(
+          tx,
+          admin.id,
+          "Package payment to review",
+          `${a.name} submitted payment for ${product.name}.`,
+        );
+      }
+
+      return mp;
+    });
+  }
+
+  async memberPackages(a: Actor) {
+    return this.db.memberPackage.findMany({
+      where: a.role === "ADMIN" ? {} : { userId: a.id },
+      include: {
+        packageProduct: true,
+        user: { select: memberSelect },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    });
+  }
+
+  async reviewPackagePurchase(id: string, approve: boolean, reason?: string) {
+    return this.db.serial(async (tx) => {
+      const mp = await tx.memberPackage.findUnique({
+        where: { id },
+        include: { packageProduct: true, user: true },
+      });
+      if (!mp) throw new NotFoundException();
+      if (mp.status !== "PENDING_REVIEW")
+        throw new ConflictException("This purchase has already been reviewed.");
+
+      if (approve) {
+        const now = new Date();
+        const expiresAt = new Date(+now + mp.packageProduct.validityDays * 86400000);
+
+        const updated = await tx.memberPackage.update({
+          where: { id },
+          data: {
+            status: "ACTIVE",
+            activatedAt: now,
+            expiresAt,
+          },
+        });
+
+        // Atomically grant credits to the user profile
+        await tx.user.update({
+          where: { id: mp.userId },
+          data: { credits: { increment: mp.creditsTotal } },
+        });
+
+        // Append to credit ledger
+        await tx.creditLedger.create({
+          data: {
+            userId: mp.userId,
+            packageId: mp.id,
+            delta: mp.creditsTotal,
+            reason: `Package activated: ${mp.packageProduct.name}`,
+          },
+        });
+
+        await this.notify(
+          tx,
+          mp.userId,
+          "Package activated!",
+          `${mp.packageProduct.name} is now active. ${mp.creditsTotal} class credits added to your balance.`,
+        );
+
+        return updated;
+      } else {
+        const updated = await tx.memberPackage.update({
+          where: { id },
+          data: {
+            status: "REJECTED",
+            rejectionReason: reason,
+          },
+        });
+
+        await this.notify(
+          tx,
+          mp.userId,
+          "Package payment rejected",
+          `Payment for ${mp.packageProduct.name} could not be verified: ${reason}`,
+        );
+
+        return updated;
+      }
     });
   }
   async promotion(d: D.PromotionDto) {

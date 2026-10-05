@@ -168,8 +168,39 @@ async function main() {
     },
   });
 
+  // Seed Packages (4 classes and 8 classes bundles per spec)
+  await db.packageProduct.upsert({
+    where: { id: "pkg-4-classes" },
+    update: {},
+    create: {
+      id: "pkg-4-classes",
+      name: "4-Class Starter Package",
+      description: "Enjoy 4 pole or movement classes. Valid for 30 days from activation.",
+      credits: 4,
+      price: 90000,
+      validityDays: 30,
+      allowedTypes: ["POLE_CLASS", "TRIAL", "PRACTICE"],
+      active: true,
+    },
+  });
+
+  await db.packageProduct.upsert({
+    where: { id: "pkg-8-classes" },
+    update: {},
+    create: {
+      id: "pkg-8-classes",
+      name: "8-Class Studio Flow Package",
+      description: "Best value bundle of 8 classes. Valid for 60 days from activation.",
+      credits: 8,
+      price: 160000,
+      validityDays: 60,
+      allowedTypes: ["POLE_CLASS", "TRIAL", "PRACTICE"],
+      active: true,
+    },
+  });
+
   console.log(
-    "Seed complete: Admin, instructor users & profiles, members, sessions, and promotion created.",
+    "Seed complete: Admin, instructor users & profiles, members, sessions, promotion, and packages created.",
   );
 }
 

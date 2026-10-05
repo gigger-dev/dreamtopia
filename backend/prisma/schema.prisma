@@ -10,155 +10,238 @@ enum Role {
   INSTRUCTOR
   MEMBER
 }
+
 enum SessionType {
   POLE_CLASS
   TRIAL
   PRACTICE
   RENTAL
 }
+
+enum BookingMode {
+  PACKAGE_ONLY
+  WALK_IN_ONLY
+  BOTH
+}
+
 enum SessionStatus {
   PENDING_INSTRUCTOR
   SCHEDULED
   CANCELLED
   COMPLETED
 }
+
 enum BookingStatus {
   PENDING
   CONFIRMED
   REJECTED
   CANCELLED
+  PAID_AWAITING_RESOLUTION
 }
+
+enum PackageStatus {
+  PENDING_REVIEW
+  ACTIVE
+  EXHAUSTED
+  EXPIRED
+  REJECTED
+}
+
 enum PaymentMethod {
   BANK_TRANSFER
   CREDITS
 }
+
 enum Attendance {
   UNMARKED
   PRESENT
   ABSENT
 }
+
 model User {
-  id String @id @default(uuid())
-  email String @unique
-  name String
+  id           String            @id @default(uuid())
+  email        String            @unique
+  name         String
   passwordHash String
-  role Role @default(MEMBER)
-  credits Int @default(0)
-  createdAt DateTime @default(now())
-  instructor Instructor?
-  bookings Booking[]
-  proofs PaymentProof[]
-  ledger CreditLedger[]
+  role         Role              @default(MEMBER)
+  credits      Int               @default(0)
+  createdAt    DateTime          @default(now())
+  instructor   Instructor?
+  bookings     Booking[]
+  packages     MemberPackage[]
+  proofs       PaymentProof[]
+  ledger       CreditLedger[]
   notifications Notification[]
-  requests TimeslotRequest[]
+  requests     TimeslotRequest[]
 }
+
 model Instructor {
-  id String @id @default(uuid())
-  userId String? @unique
-  user User? @relation(fields:[userId],references:[id])
-  email String @unique
-  name String
-  bio String @default("")
-  specialty String @default("Pole foundations")
-  autoAccept Boolean @default(false)
-  sessions Session[]
-  blocks UnavailableSlot[]
+  id         String            @id @default(uuid())
+  userId     String?           @unique
+  user       User?             @relation(fields: [userId], references: [id])
+  email      String            @unique
+  name       String
+  phone      String?
+  bio        String            @default("")
+  specialty  String            @default("Pole foundations")
+  autoAccept Boolean           @default(false)
+  sessions   Session[]
+  blocks     UnavailableSlot[]
 }
+
+model PackageProduct {
+  id             String          @id @default(uuid())
+  name           String
+  description    String          @default("")
+  credits        Int
+  price          Int
+  validityDays   Int             @default(30)
+  allowedTypes   SessionType[]   @default([POLE_CLASS])
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  memberPackages MemberPackage[]
+}
+
+model MemberPackage {
+  id               String          @id @default(uuid())
+  userId           String
+  user             User            @relation(fields: [userId], references: [id])
+  packageProductId String
+  packageProduct  PackageProduct  @relation(fields: [packageProductId], references: [id])
+  creditsTotal     Int
+  creditsRemaining Int
+  pricePaid        Int
+  status           PackageStatus   @default(PENDING_REVIEW)
+  proofId          String?         @unique
+  proof            PaymentProof?   @relation(fields: [proofId], references: [id])
+  rejectionReason  String?
+  activatedAt      DateTime?
+  expiresAt        DateTime?
+  createdAt        DateTime        @default(now())
+  bookings         Booking[]
+  ledgerEntries    CreditLedger[]
+
+  @@index([userId, status])
+  @@index([expiresAt])
+}
+
 model Session {
-  id String @id @default(uuid())
-  title String
-  type SessionType
-  startsAt DateTime
-  endsAt DateTime
-  capacity Int
-  price Int
-  level String @default("All levels")
-  description String @default("")
+  id           String        @id @default(uuid())
+  title        String
+  type         SessionType
+  bookingMode  BookingMode   @default(BOTH)
+  creditCost   Int           @default(1)
+  startsAt     DateTime
+  endsAt       DateTime
+  capacity     Int
+  price        Int
+  level        String        @default("All levels")
+  description  String        @default("")
   instructorId String?
-  instructor Instructor? @relation(fields:[instructorId],references:[id])
-  status SessionStatus
-  deletedAt DateTime?
-  createdAt DateTime @default(now())
-  bookings Booking[]
-  @@index([startsAt,status])
-  @@index([instructorId,startsAt])
+  instructor   Instructor?   @relation(fields: [instructorId], references: [id])
+  status       SessionStatus
+  deletedAt    DateTime?
+  createdAt    DateTime      @default(now())
+  bookings     Booking[]
+
+  @@index([startsAt, status])
+  @@index([instructorId, startsAt])
 }
+
 model UnavailableSlot {
-  id String @id @default(uuid())
+  id           String     @id @default(uuid())
   instructorId String
-  instructor Instructor @relation(fields:[instructorId],references:[id])
-  startsAt DateTime
-  endsAt DateTime
-  reason String @default("")
-  @@index([instructorId,startsAt])
+  instructor   Instructor @relation(fields: [instructorId], references: [id])
+  startsAt     DateTime
+  endsAt       DateTime
+  reason       String     @default("")
+
+  @@index([instructorId, startsAt])
 }
+
 model PaymentProof {
-  id String @id @default(uuid())
-  userId String
-  user User @relation(fields:[userId],references:[id])
-  filename String
-  mime String
-  createdAt DateTime @default(now())
-  booking Booking?
+  id            String         @id @default(uuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id])
+  filename      String
+  mime          String
+  createdAt     DateTime       @default(now())
+  booking       Booking?
+  memberPackage MemberPackage?
 }
+
 model Booking {
-  id String @id @default(uuid())
-  memberId String
-  member User @relation(fields:[memberId],references:[id])
-  sessionId String
-  session Session @relation(fields:[sessionId],references:[id])
-  status BookingStatus @default(PENDING)
-  paymentMethod PaymentMethod
-  proofId String? @unique
-  proof PaymentProof? @relation(fields:[proofId],references:[id])
-  amount Int
-  discount Int @default(0)
-  promoCode String?
-  creditReserved Boolean @default(false)
-  attendance Attendance @default(UNMARKED)
+  id              String        @id @default(uuid())
+  memberId        String
+  member          User          @relation(fields: [memberId], references: [id])
+  sessionId       String
+  session         Session       @relation(fields: [sessionId], references: [id])
+  status          BookingStatus @default(PENDING)
+  paymentMethod   PaymentMethod
+  packageId       String?
+  package         MemberPackage? @relation(fields: [packageId], references: [id])
+  creditsUsed     Int           @default(0)
+  proofId         String?       @unique
+  proof           PaymentProof? @relation(fields: [proofId], references: [id])
+  amount          Int
+  discount        Int           @default(0)
+  promoCode       String?
+  creditReserved  Boolean       @default(false)
+  attendance      Attendance    @default(UNMARKED)
   rejectionReason String?
-  createdAt DateTime @default(now())
-  @@index([memberId,status])
-  @@index([sessionId,status])
+  overrideReason  String?
+  createdAt       DateTime      @default(now())
+
+  @@index([memberId, status])
+  @@index([sessionId, status])
 }
+
 model CreditLedger {
-  id String @id @default(uuid())
-  userId String
-  user User @relation(fields:[userId],references:[id])
-  delta Int
-  reason String
+  id        String         @id @default(uuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id])
+  packageId String?
+  package   MemberPackage? @relation(fields: [packageId], references: [id])
+  delta     Int
+  reason    String
   bookingId String?
-  createdAt DateTime @default(now())
-  @@index([userId,createdAt])
+  createdAt DateTime       @default(now())
+
+  @@index([userId, createdAt])
 }
+
 model Promotion {
-  id String @id @default(uuid())
-  code String @unique
-  percent Int
+  id        String   @id @default(uuid())
+  code      String   @unique
+  percent   Int
   expiresAt DateTime
-  active Boolean @default(true)
+  active    Boolean  @default(true)
 }
+
 model Notification {
-  id String @id @default(uuid())
-  userId String
-  user User @relation(fields:[userId],references:[id])
-  title String
-  body String
-  readAt DateTime?
-  dedupeKey String? @unique
-  createdAt DateTime @default(now())
-  @@index([userId,createdAt])
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  title     String
+  body      String
+  readAt    DateTime?
+  dedupeKey String?   @unique
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
 }
+
 model TimeslotRequest {
-  id String @id @default(uuid())
-  memberId String
-  member User @relation(fields:[memberId],references:[id])
-  type SessionType
-  startsAt DateTime
-  endsAt DateTime
-  note String @default("")
-  status String @default("PENDING")
-  response String?
-  createdAt DateTime @default(now())
-  @@index([memberId,status])
+  id        String      @id @default(uuid())
+  memberId  String
+  member    User        @relation(fields: [memberId], references: [id])
+  type      SessionType
+  startsAt  DateTime
+  endsAt    DateTime
+  note      String      @default("")
+  status    String      @default("PENDING")
+  response  String?
+  createdAt DateTime    @default(now())
+
+  @@index([memberId, status])
 }
