@@ -48,6 +48,7 @@ class _StudioScreenState extends State<StudioScreen> {
       packages = [],
       packageProducts = [];
   String page = 'Schedule', filter = 'ALL';
+  String bookingFilter = 'ALL';
   String viewMode = 'WEEK'; // 'WEEK', 'MONTH', 'DAY'
   String? selectedInstructorId;
   String searchQuery = '';
@@ -1238,10 +1239,28 @@ class _StudioScreenState extends State<StudioScreen> {
                     ? 'Class attendance.'
                     : 'Your next moments.',
             '${bookings.length} bookings · ${admin ? 'Review payments and confirm places' : teacher ? 'Record attendance after class starts' : 'Manage your sessions and attendance'}'),
-        if (bookings.isEmpty)
-          empty('Your bookings will appear here.',
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final entry in const {
+            'ALL': 'All bookings',
+            'PENDING': 'Pending Review',
+            'PAID_AWAITING_RESOLUTION': 'Needs Resolution',
+            'CONFIRMED': 'Confirmed',
+            'CANCELLED': 'Cancelled',
+          }.entries)
+            ChoiceChip(
+                label: Text(
+                  entry.value,
+                  style: const TextStyle(fontSize: 12, color: Colors.black),
+                ),
+                selected: bookingFilter == entry.key,
+                onSelected: (_) =>
+                    setState(() => bookingFilter = entry.key))
+        ]),
+        const SizedBox(height: 16),
+        if (bookings.where((b) => bookingFilter == 'ALL' || b['status'] == bookingFilter).isEmpty)
+          empty('No bookings found matching filter.',
               Icons.confirmation_number_outlined),
-        for (final b in bookings)
+        for (final b in bookings.where((b) => bookingFilter == 'ALL' || b['status'] == bookingFilter))
           Padding(
               padding: const EdgeInsets.only(bottom: 14),
               child: Card(
@@ -1272,6 +1291,12 @@ class _StudioScreenState extends State<StudioScreen> {
                                     const TextStyle(color: plum, fontSize: 14)),
                             if (b['rejectionReason'] != null)
                               Text(b['rejectionReason'] as String),
+                            if (b['overrideReason'] != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text('Note: ${b['overrideReason']}',
+                                    style: const TextStyle(fontSize: 13, color: muted)),
+                              ),
                             const SizedBox(height: 12),
                             Wrap(spacing: 8, runSpacing: 8, children: [
                               if (b['proofId'] != null && (admin || member))
@@ -1312,6 +1337,51 @@ class _StudioScreenState extends State<StudioScreen> {
                                             'bookings/${b['id']}/reject',
                                             submit: 'Reject booking'),
                                     child: const Text('Reject'))
+                              ],
+                              if (admin && b['status'] == 'PAID_AWAITING_RESOLUTION') ...[
+                                FilledButton.icon(
+                                    onPressed: busy
+                                        ? null
+                                        : () => form(
+                                              'Reassign to Session',
+                                              [
+                                                FieldSpec('targetSessionId', 'Select alternative session',
+                                                    options: {
+                                                      for (final s in sessions.where((x) =>
+                                                          x['status'] == 'SCHEDULED' &&
+                                                          DateTime.parse(x['startsAt'] as String)
+                                                              .isAfter(DateTime.now()) &&
+                                                          (x['spotsLeft'] as int) > 0 &&
+                                                          x['id'] != b['sessionId']))
+                                                        s['id'] as String:
+                                                            '${s['title']} (${when(s['startsAt'], 'EEE d MMM HH:mm')})'
+                                                    }),
+                                                const FieldSpec('note', 'Reassignment note (optional)',
+                                                    optional: true),
+                                              ],
+                                              'admin/bookings/${b['id']}/resolve',
+                                              submit: 'Reassign booking',
+                                              note:
+                                                  'The payment was already verified. The member will be enrolled into the new session without charging again.',
+                                            ),
+                                    icon: const Icon(Icons.swap_horiz, size: 16),
+                                    label: const Text('Reassign Session')),
+                                OutlinedButton.icon(
+                                    onPressed: busy
+                                        ? null
+                                        : () => form(
+                                              'Complete Refund',
+                                              const [
+                                                FieldSpec('note', 'Refund transaction reference / note',
+                                                    multiline: true),
+                                              ],
+                                              'admin/bookings/${b['id']}/resolve',
+                                              submit: 'Complete refund',
+                                              note:
+                                                  'Mark the bank-transfer refund as processed. The booking will transition to Cancelled and the member will be notified.',
+                                            ),
+                                    icon: const Icon(Icons.money_off, size: 16),
+                                    label: const Text('Complete Refund')),
                               ],
                               if (admin &&
                                   ['PENDING', 'CONFIRMED', 'PAID_AWAITING_RESOLUTION']
@@ -1428,8 +1498,31 @@ class _StudioScreenState extends State<StudioScreen> {
           stat(
               'Classes attended',
               '${bookings.where((b) => b['attendance'] == 'PRESENT').length}',
-              'Your recorded attendance')
+              'Your recorded attendance'),
+          stat('Active packages', '${packages.where((p) => p['status'] == 'ACTIVE').length}',
+              'Valid passes with credits',
+              tinted: true)
         ]),
+        const SizedBox(height: 28),
+        Text('My package passes',
+            style: GoogleFonts.cinzel(
+                fontSize: 20, fontWeight: FontWeight.w600, color: ink)),
+        const SizedBox(height: 16),
+        if (packages.isEmpty)
+          empty('No active or previous packages found.', Icons.card_membership_outlined)
+        else
+          for (final p in packages)
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: ListTile(
+                leading: const Icon(Icons.card_membership, color: plum),
+                title: Text(p['packageProduct']?['name'] ?? 'Class Package',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(
+                    '${p['creditsRemaining']} of ${p['creditsTotal']} credits left · ${p['expiresAt'] != null ? 'Expires ${when(p['expiresAt'], 'd MMM yyyy')}' : 'Pending activation'}'),
+                trailing: StatusBadge(p['status'] as String),
+              ),
+            ),
         const SizedBox(height: 28),
         Text('Class credit history',
             style: GoogleFonts.cinzel(

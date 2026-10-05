@@ -711,6 +711,91 @@ export class StudioService {
       return r;
     });
   }
+
+  async resolveBooking(id: string, d: D.ResolveBookingDto) {
+    return this.db.serial(async (tx) => {
+      const b = await tx.booking.findUnique({
+        where: { id },
+        include: { session: true },
+      });
+      if (!b) throw new NotFoundException();
+      if (b.status !== "PAID_AWAITING_RESOLUTION")
+        throw new BadRequestException(
+          "Only bookings awaiting resolution can be resolved through this workflow.",
+        );
+
+      if (d.action === "REFUND") {
+        const note = d.note?.trim() || "Refund completed by studio administration";
+        const updated = await tx.booking.update({
+          where: { id },
+          data: {
+            status: "CANCELLED",
+            overrideReason: note,
+          },
+        });
+        await this.notify(
+          tx,
+          b.memberId,
+          "Refund completed",
+          `Your payment for ${b.session.title} was refunded. Note: ${note}`,
+        );
+        return updated;
+      }
+
+      if (d.action === "REASSIGN") {
+        if (!d.targetSessionId)
+          throw new BadRequestException("Target session is required for reassignment.");
+
+        const target = await tx.session.findUnique({
+          where: { id: d.targetSessionId },
+          include: {
+            bookings: { where: { status: { in: ["CONFIRMED", "PENDING"] } } },
+          },
+        });
+        if (!target || target.deletedAt || target.status !== "SCHEDULED")
+          throw new BadRequestException("Selected target session is not open for bookings.");
+        if (target.startsAt <= new Date())
+          throw new BadRequestException("Target session has already started or passed.");
+
+        const confirmedCount = target.bookings.filter((x) => x.status === "CONFIRMED").length;
+        if (confirmedCount >= target.capacity)
+          throw new ConflictException("Target session is already at full capacity.");
+
+        // Check if member already booked target session
+        if (
+          await tx.booking.count({
+            where: {
+              memberId: b.memberId,
+              sessionId: target.id,
+              status: { in: ["CONFIRMED", "PENDING"] },
+            },
+          })
+        )
+          throw new ConflictException("Member is already enrolled in the target session.");
+
+        const updated = await tx.booking.update({
+          where: { id },
+          data: {
+            sessionId: target.id,
+            status: "CONFIRMED",
+            overrideReason: `Reassigned from ${b.session.title}: ${d.note ?? "Session reassignment"}`,
+          },
+        });
+
+        await this.notify(
+          tx,
+          b.memberId,
+          "Booking reassigned",
+          `Your booking was confirmed for ${target.title} on ${target.startsAt.toISOString()}.`,
+        );
+
+        return updated;
+      }
+
+      throw new BadRequestException("Invalid resolution action.");
+    });
+  }
+
   async adminBook(d: D.AdminBookingDto) {
     return this.db.serial(async (tx) => {
       const member = await tx.user.findUnique({ where: { id: d.memberId } });

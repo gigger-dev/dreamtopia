@@ -50,6 +50,12 @@ export class DeclineSessionDto {
   @IsOptional() @IsString() @MaxLength(500) reason?: string;
 }
 
+export class ResolveBookingDto {
+  @IsIn(["REASSIGN", "REFUND"]) action!: "REASSIGN" | "REFUND";
+  @IsOptional() @IsUUID() targetSessionId?: string;
+  @IsOptional() @IsString() @MaxLength(500) note?: string;
+}
+
 export class BookingDto {
   @IsUUID() sessionId!: string;
   @IsEnum(PaymentMethod) paymentMethod!: PaymentMethod;

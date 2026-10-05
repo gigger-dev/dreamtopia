@@ -123,6 +123,12 @@ export class StudioController {
   ) {
     return this.service.adminCancelBooking(id, d.reason);
   }
+  @Roles("ADMIN") @Post("admin/bookings/:id/resolve") resolveBooking(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() d: D.ResolveBookingDto,
+  ) {
+    return this.service.resolveBooking(id, d);
+  }
   @Roles("ADMIN") @Post("bookings/:id/approve") approve(
     @Param("id", ParseUUIDPipe) id: string,
   ) {
