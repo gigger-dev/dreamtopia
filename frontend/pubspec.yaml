@@ -12,6 +12,7 @@ dependencies:
   file_picker: ^10.1.0
   intl: ^0.20.2
   timezone: ^0.10.0
+  google_fonts: ^6.2.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

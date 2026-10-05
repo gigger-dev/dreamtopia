@@ -1,11 +1,17 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:timezone/timezone.dart' as tz;
 import '../api.dart';
 import '../theme.dart';
 import '../widgets/forms.dart';
 import 'booking.dart';
+
+// ignore: unused_element
+TextStyle _cinzel(double size,
+        {FontWeight fw = FontWeight.w600, Color? color}) =>
+    GoogleFonts.cinzel(fontSize: size, fontWeight: fw, color: color ?? ink);
 
 const sessionTypes = {
   'POLE_CLASS': 'Pole classes',
@@ -38,9 +44,14 @@ class _StudioScreenState extends State<StudioScreen> {
       blocks = [],
       ledger = [];
   String page = 'Schedule', filter = 'ALL';
+  String viewMode = 'WEEK'; // 'WEEK', 'MONTH', 'DAY'
+  String? selectedInstructorId;
+  String searchQuery = '';
+  final searchController = TextEditingController();
   String? error;
   bool loading = true, busy = false;
   late DateTime week;
+  late DateTime selectedDate;
   Timer? timer;
   int loadVersion = 0;
   Api get api => widget.api;
@@ -52,8 +63,8 @@ class _StudioScreenState extends State<StudioScreen> {
   void initState() {
     super.initState();
     final now = DateTime.now();
-    week = DateTime(now.year, now.month, now.day)
-        .subtract(Duration(days: now.weekday - 1));
+    selectedDate = DateTime(now.year, now.month, now.day);
+    week = selectedDate.subtract(Duration(days: now.weekday - 1));
     load();
     timer =
         Timer.periodic(const Duration(seconds: 60), (_) => refreshNotices());
@@ -61,6 +72,7 @@ class _StudioScreenState extends State<StudioScreen> {
 
   @override
   void dispose() {
+    searchController.dispose();
     timer?.cancel();
     super.dispose();
   }
@@ -199,12 +211,18 @@ class _StudioScreenState extends State<StudioScreen> {
               for (final i in instructors)
                 i['id'] as String: i['name'] as String
             }),
+        const FieldSpec(
+          'requireConfirmation',
+          'Require instructor confirmation\n(uncheck for auto-scheduled)',
+          boolean: true,
+          initial: 'true',
+        ),
         const FieldSpec('description', 'About this session',
             multiline: true, optional: true),
       ],
       'sessions',
       note:
-          'Times are in ${settings['timezone']}. A rental reserves the whole studio. Classes are published after instructor acceptance, or immediately when auto-accept is on.');
+          'Times are in ${settings['timezone']}. A rental reserves the whole studio. Classes with confirmation enabled are published after instructor acceptance.');
   Future<void> requestTime() => form(
       'Your preferred timeslot',
       const [
@@ -251,8 +269,9 @@ class _StudioScreenState extends State<StudioScreen> {
         appBar: wide
             ? null
             : AppBar(
-                title: const Text('dreamtopia',
-                    style: TextStyle(fontFamily: 'serif', color: plum)),
+                title: Text('Dreamtopia',
+                    style: GoogleFonts.cinzel(
+                        color: plum, fontWeight: FontWeight.w600)),
                 actions: [
                     IconButton(
                         onPressed: load,
@@ -270,8 +289,7 @@ class _StudioScreenState extends State<StudioScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 36),
                   decoration: const BoxDecoration(
                       color: Colors.white,
-                      border:
-                          Border(bottom: BorderSide(color: Color(0xFFEAE3F0)))),
+                      border: Border(bottom: BorderSide(color: sageBorder))),
                   child: Row(children: [
                     Text('Studio / $page',
                         style: const TextStyle(color: muted, fontSize: 14)),
@@ -332,30 +350,34 @@ class _StudioScreenState extends State<StudioScreen> {
       color: Colors.white,
       child: Container(
           decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: Color(0xFFEAE3F0)))),
+              border: Border(right: BorderSide(color: sageBorder))),
           child: SafeArea(
               child: Column(children: [
             Padding(
                 padding: const EdgeInsets.fromLTRB(24, 30, 24, 24),
                 child: Column(children: [
-                  const Row(children: [
-                    Icon(Icons.auto_awesome_outlined, color: plum, size: 28),
-                    SizedBox(width: 9),
+                  Row(children: [
+                    const Icon(Icons.auto_awesome_outlined,
+                        color: plum, size: 28),
+                    const SizedBox(width: 9),
                     Expanded(
                         child: FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
-                            child: Text('dreamtopia',
-                                style: TextStyle(
-                                    fontFamily: 'serif',
-                                    fontSize: 29,
-                                    color: plum))))
+                            child: Text('Dreamtopia',
+                                style: GoogleFonts.cinzel(
+                                    fontSize: 27,
+                                    fontWeight: FontWeight.bold,
+                                    color: sageGreen))))
                   ]),
-                  const SizedBox(height: 10),
-                  const Text('POLE & MOVEMENT STUDIO',
-                      style: TextStyle(
-                          fontSize: 10, letterSpacing: 1.6, color: muted)),
-                  const SizedBox(height: 25),
+                  const SizedBox(height: 6),
+                  Text('Yoga & Movement Studio',
+                      style: GoogleFonts.lato(
+                          fontSize: 10,
+                          letterSpacing: 1.8,
+                          color: muted,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 22),
                   const ChakraLine()
                 ])),
             Expanded(
@@ -367,10 +389,10 @@ class _StudioScreenState extends State<StudioScreen> {
                         padding: const EdgeInsets.only(bottom: 5),
                         child: ListTile(
                             shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(9)),
+                                borderRadius: BorderRadius.circular(4)),
                             selected: page == item.$1,
                             selectedColor: plum,
-                            selectedTileColor: const Color(0xFFF0E8F7),
+                            selectedTileColor: sageLight,
                             leading: Icon(item.$2, size: 21),
                             title: Text(item.$1,
                                 style: const TextStyle(fontSize: 14)),
@@ -386,18 +408,23 @@ class _StudioScreenState extends State<StudioScreen> {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('A little stronger.\nA little more you.',
-                          style: TextStyle(
-                              fontFamily: 'serif', fontSize: 23, color: plum)),
+                      Text('A little stronger.\nA little more you.',
+                          style: GoogleFonts.cinzel(
+                              fontSize: 18,
+                              color: sageGreen,
+                              fontWeight: FontWeight.w500,
+                              height: 1.5)),
                       const SizedBox(height: 24),
                       const Divider(),
                       ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: CircleAvatar(
-                              backgroundColor: const Color(0xFFEFE5F7),
-                              child: Text((me!['name'] as String)
-                                  .substring(0, 1)
-                                  .toUpperCase())),
+                              backgroundColor: sageLight,
+                              child: Text(
+                                  (me!['name'] as String)
+                                      .substring(0, 1)
+                                      .toUpperCase(),
+                                  style: const TextStyle(color: sageGreen))),
                           title: Text(me!['name'] as String,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -414,24 +441,59 @@ class _StudioScreenState extends State<StudioScreen> {
           {Widget? button}) =>
       Padding(
           padding: const EdgeInsets.only(bottom: 26),
-          child: Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              runSpacing: 18,
-              spacing: 22,
-              children: [
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(eyebrow,
-                      style: const TextStyle(
-                          letterSpacing: 2, fontSize: 11, color: plum)),
-                  const SizedBox(height: 10),
-                  Text(title,
-                      style: Theme.of(context).textTheme.headlineMedium),
-                  const SizedBox(height: 10),
-                  Text(subtitle,
-                      style: const TextStyle(color: muted, fontSize: 14))
-                ]),
-                if (button != null) button
-              ]));
+          child: LayoutBuilder(builder: (context, constraints) {
+            final isDesktop = constraints.maxWidth >= 600;
+            return isDesktop
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Text(eyebrow,
+                                style: GoogleFonts.lato(
+                                    letterSpacing: 2.5,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: sageGreen)),
+                            const SizedBox(height: 10),
+                            Text(title,
+                                style:
+                                    Theme.of(context).textTheme.headlineMedium),
+                            const SizedBox(height: 10),
+                            Text(subtitle,
+                                style:
+                                    const TextStyle(color: muted, fontSize: 14))
+                          ])),
+                      if (button != null)
+                        Padding(
+                            padding: const EdgeInsets.only(left: 20),
+                            child: button)
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(eyebrow,
+                          style: GoogleFonts.lato(
+                              letterSpacing: 2.5,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: sageGreen)),
+                      const SizedBox(height: 10),
+                      Text(title,
+                          style: Theme.of(context).textTheme.headlineMedium),
+                      const SizedBox(height: 10),
+                      Text(subtitle,
+                          style: const TextStyle(color: muted, fontSize: 14)),
+                      if (button != null) ...[
+                        const SizedBox(height: 16),
+                        SizedBox(width: double.infinity, child: button)
+                      ]
+                    ],
+                  );
+          }));
   Widget empty(String text, IconData icon) => Card(
       child: Padding(
           padding: const EdgeInsets.all(34),
@@ -445,31 +507,52 @@ class _StudioScreenState extends State<StudioScreen> {
           ]))));
   Widget stat(String title, String value, String subtitle,
           {bool tinted = false}) =>
-      SizedBox(
-          width: 280,
-          child: Card(
-              color: tinted ? const Color(0xFFEFE5F6) : null,
-              child: Padding(
-                  padding: const EdgeInsets.all(22),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title,
-                            style: const TextStyle(color: muted, fontSize: 13)),
-                        const SizedBox(height: 14),
-                        Text(value,
-                            style: TextStyle(
-                                fontSize: 26,
-                                color: tinted ? plum : ink,
-                                fontFamily: tinted ? 'serif' : null)),
-                        const SizedBox(height: 10),
-                        Text(subtitle,
-                            style: const TextStyle(color: muted, fontSize: 13))
-                      ]))));
+      LayoutBuilder(builder: (context, constraints) {
+        return Container(
+            constraints: const BoxConstraints(minWidth: 260, maxWidth: 360),
+            child: Card(
+                color: tinted ? sageLight : null,
+                child: Padding(
+                    padding: const EdgeInsets.all(22),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(title,
+                              style:
+                                  const TextStyle(color: muted, fontSize: 13)),
+                          const SizedBox(height: 14),
+                          Text(value,
+                              style: TextStyle(
+                                  fontSize: 26,
+                                  color: tinted ? plum : ink,
+                                  fontFamily: tinted
+                                      ? GoogleFonts.cinzel().fontFamily
+                                      : GoogleFonts.lato().fontFamily)),
+                          const SizedBox(height: 10),
+                          Text(subtitle,
+                              style:
+                                  const TextStyle(color: muted, fontSize: 13))
+                        ]))));
+      });
   Widget schedule() {
     final now = tz.TZDateTime.now(zone);
-    final filtered =
-        sessions.where((s) => filter == 'ALL' || s['type'] == filter).toList();
+    final filtered = sessions.where((s) {
+      if (filter != 'ALL' && s['type'] != filter) return false;
+      if (selectedInstructorId != null &&
+          s['instructor']?['id'] != selectedInstructorId) return false;
+      if (searchQuery.isNotEmpty) {
+        final q = searchQuery.toLowerCase();
+        final title = (s['title'] as String? ?? '').toLowerCase();
+        final instructorName =
+            (s['instructor']?['name'] as String? ?? '').toLowerCase();
+        final desc = (s['description'] as String? ?? '').toLowerCase();
+        if (!title.contains(q) &&
+            !instructorName.contains(q) &&
+            !desc.contains(q)) return false;
+      }
+      return true;
+    }).toList();
+
     final confirmed = bookings
         .where((b) =>
             b['status'] == 'CONFIRMED' &&
@@ -478,6 +561,7 @@ class _StudioScreenState extends State<StudioScreen> {
         .toList()
       ..sort((a, b) => (a['session']['startsAt'] as String)
           .compareTo(b['session']['startsAt'] as String));
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       heading(
           'FIND YOUR FLOW',
@@ -533,64 +617,180 @@ class _StudioScreenState extends State<StudioScreen> {
             tinted: true)
       ]),
       const SizedBox(height: 32),
+
+      // Advanced Search & Filter Bar
+      Card(
+          child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(Icons.tune_outlined, color: plum, size: 20),
+                      const SizedBox(width: 8),
+                      const Text('Advanced Search & Filters',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      if (searchQuery.isNotEmpty ||
+                          filter != 'ALL' ||
+                          selectedInstructorId != null)
+                        TextButton.icon(
+                            onPressed: () => setState(() {
+                                  searchQuery = '';
+                                  searchController.clear();
+                                  filter = 'ALL';
+                                  selectedInstructorId = null;
+                                }),
+                            icon: const Icon(Icons.clear_all, size: 16),
+                            label: const Text('Reset filters'))
+                    ]),
+                    const SizedBox(height: 14),
+                    Wrap(spacing: 14, runSpacing: 14, children: [
+                      SizedBox(
+                          width: 260,
+                          child: TextField(
+                              controller: searchController,
+                              onChanged: (v) =>
+                                  setState(() => searchQuery = v.trim()),
+                              decoration: InputDecoration(
+                                  labelText: 'Search class or instructor',
+                                  prefixIcon:
+                                      const Icon(Icons.search, size: 18),
+                                  isDense: true,
+                                  suffixIcon: searchQuery.isNotEmpty
+                                      ? IconButton(
+                                          icon:
+                                              const Icon(Icons.close, size: 16),
+                                          onPressed: () => setState(() {
+                                                searchController.clear();
+                                                searchQuery = '';
+                                              }))
+                                      : null))),
+                      if (instructors.isNotEmpty)
+                        SizedBox(
+                            width: 220,
+                            child: DropdownButtonFormField<String?>(
+                                value: selectedInstructorId,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                    labelText: 'Filter by Instructor',
+                                    isDense: true),
+                                items: [
+                                  const DropdownMenuItem(
+                                      value: null,
+                                      child: Text('All Instructors')),
+                                  for (final ins in instructors)
+                                    DropdownMenuItem(
+                                        value: ins['id'] as String,
+                                        child: Text(ins['name'] as String))
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => selectedInstructorId = v))),
+                    ]),
+                    const SizedBox(height: 14),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      for (final entry
+                          in {'ALL': 'All sessions', ...sessionTypes}.entries)
+                        ChoiceChip(
+                            label: Text(
+                              entry.value,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.black,
+                              ),
+                            ),
+                            selected: filter == entry.key,
+                            onSelected: (_) =>
+                                setState(() => filter = entry.key))
+                    ])
+                  ]))),
+      const SizedBox(height: 24),
+
+      // Calendar Navigation & View Mode Toggle (Day / Week / Month)
       Wrap(
           spacing: 18,
           runSpacing: 12,
           alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            const Text('The studio schedule',
-                style: TextStyle(fontFamily: 'serif', fontSize: 25)),
-            Text('All times · ${settings['timezone']}',
-                style: const TextStyle(fontSize: 13, color: muted))
+            Text('The studio schedule',
+                style: GoogleFonts.cinzel(
+                    fontSize: 22, fontWeight: FontWeight.w600, color: ink)),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final entry in const {
+                'DAY': 'Day',
+                'WEEK': 'Week',
+                'MONTH': 'Month'
+              }.entries)
+                ChoiceChip(
+                    label: Text(
+                      entry.value,
+                      style: const TextStyle(fontSize: 12, color: Colors.black),
+                    ),
+                    selected: viewMode == entry.key,
+                    onSelected: (_) => setState(() => viewMode = entry.key))
+            ])
           ]),
-      const SizedBox(height: 18),
-      Wrap(spacing: 8, runSpacing: 8, children: [
-        for (final entry in {'ALL': 'All sessions', ...sessionTypes}.entries)
-          ChoiceChip(
-              label: Text(entry.value, style: const TextStyle(fontSize: 13)),
-              selected: filter == entry.key,
-              onSelected: (_) => setState(() => filter = entry.key))
-      ]),
-      const SizedBox(height: 20),
+      const SizedBox(height: 14),
+
+      // Date Header & Stepper
       Card(
           child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(children: [
                 Expanded(
                     child: Text(
-                        '${DateFormat('d MMM').format(week)} – ${DateFormat('d MMM yyyy').format(week.add(const Duration(days: 6)))}',
-                        style: const TextStyle(fontWeight: FontWeight.w600))),
+                        switch (viewMode) {
+                          'MONTH' => DateFormat('MMMM yyyy').format(week),
+                          'DAY' => DateFormat('EEEE, d MMMM yyyy')
+                              .format(selectedDate),
+                          _ =>
+                            '${DateFormat('d MMM').format(week)} – ${DateFormat('d MMM yyyy').format(week.add(const Duration(days: 6)))}'
+                        },
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 16))),
                 IconButton(
-                    onPressed: () => changeWeek(-7),
+                    onPressed: () => changePeriod(-1),
                     icon: const Icon(Icons.chevron_left),
-                    tooltip: 'Previous week'),
+                    tooltip: 'Previous'),
                 TextButton(
                     onPressed: () {
-                      week = DateTime(now.year, now.month, now.day)
-                          .subtract(Duration(days: now.weekday - 1));
+                      final today = tz.TZDateTime.now(zone);
+                      selectedDate =
+                          DateTime(today.year, today.month, today.day);
+                      week = selectedDate
+                          .subtract(Duration(days: today.weekday - 1));
                       load();
                     },
                     child: const Text('Today')),
                 IconButton(
-                    onPressed: () => changeWeek(7),
+                    onPressed: () => changePeriod(1),
                     icon: const Icon(Icons.chevron_right),
-                    tooltip: 'Next week')
+                    tooltip: 'Next')
               ]))),
       const SizedBox(height: 16),
-      LayoutBuilder(builder: (context, c) {
-        final desktop = c.maxWidth >= 900;
-        return desktop
-            ? Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: List.generate(
-                    7,
-                    (i) => Expanded(
-                        child: Padding(
-                            padding: EdgeInsets.only(right: i == 6 ? 0 : 9),
-                            child: dayColumn(i, filtered, now)))))
-            : Column(
-                children: List.generate(7, (i) => dayColumn(i, filtered, now)));
-      }),
+
+      // Active Calendar View
+      switch (viewMode) {
+        'DAY' => dayView(filtered, now),
+        'MONTH' => monthView(filtered, now),
+        _ => LayoutBuilder(builder: (context, c) {
+            final desktop = c.maxWidth >= 900;
+            return desktop
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: List.generate(
+                        7,
+                        (i) => Expanded(
+                            child: Padding(
+                                padding: EdgeInsets.only(right: i == 6 ? 0 : 9),
+                                child: dayColumn(i, filtered, now)))))
+                : Column(
+                    children:
+                        List.generate(7, (i) => dayColumn(i, filtered, now)));
+          })
+      },
       const SizedBox(height: 18),
       const Text(
           'Bookings are confirmed after studio review. Bank transfers are verified manually.',
@@ -598,9 +798,170 @@ class _StudioScreenState extends State<StudioScreen> {
     ]);
   }
 
-  void changeWeek(int days) {
-    setState(() => week = week.add(Duration(days: days)));
+  void changePeriod(int dir) {
+    setState(() {
+      if (viewMode == 'MONTH') {
+        week = DateTime(week.year, week.month + dir, 1);
+      } else if (viewMode == 'DAY') {
+        selectedDate = selectedDate.add(Duration(days: dir));
+        week = selectedDate.subtract(Duration(days: selectedDate.weekday - 1));
+      } else {
+        week = week.add(Duration(days: dir * 7));
+      }
+    });
     load();
+  }
+
+  Widget dayView(List<dynamic> data, DateTime now) {
+    final d = selectedDate;
+    final rows = data.where((s) {
+      final dt =
+          tz.TZDateTime.from(DateTime.parse(s['startsAt'] as String), zone);
+      return dt.year == d.year && dt.month == d.month && dt.day == d.day;
+    }).toList();
+
+    return Card(
+        child: Container(
+            height: 600,
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            child: SingleChildScrollView(
+                child: Column(
+                    children: List.generate(24, (hour) {
+              final hourLabel = hour == 0
+                  ? '00:00'
+                  : hour < 12
+                      ? '${hour.toString().padLeft(2, '0')}:00 AM'
+                      : hour == 12
+                          ? '12:00 PM'
+                          : '${(hour - 12).toString().padLeft(2, '0')}:00 PM';
+
+              final matchingSessions = rows.where((s) {
+                final startDt = tz.TZDateTime.from(
+                    DateTime.parse(s['startsAt'] as String), zone);
+                return startDt.hour == hour;
+              }).toList();
+
+              return Container(
+                  constraints: const BoxConstraints(minHeight: 64),
+                  decoration: const BoxDecoration(
+                      border: Border(
+                          bottom: BorderSide(color: sageBorder, width: 0.5))),
+                  child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                            width: 75,
+                            child: Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(hourLabel,
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: muted)))),
+                        Container(width: 1, height: 64, color: sageBorder),
+                        const SizedBox(width: 12),
+                        Expanded(
+                            child: matchingSessions.isEmpty
+                                ? const SizedBox(height: 64)
+                                : Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                        for (final s in matchingSessions)
+                                          Padding(
+                                              padding: const EdgeInsets.only(
+                                                  top: 4, bottom: 4),
+                                              child: sessionCard(
+                                                  Map<String, dynamic>.from(s),
+                                                  hour % chakra.length))
+                                      ]))
+                      ]));
+            })))));
+  }
+
+  Widget monthView(List<dynamic> data, DateTime now) {
+    final firstOfMonth = DateTime(week.year, week.month, 1);
+    final daysInMonth = DateTime(week.year, week.month + 1, 0).day;
+    final startWeekday = firstOfMonth.weekday; // 1 = Mon, 7 = Sun
+
+    final gridCells = <Widget>[];
+
+    // Headers
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    for (final h in days) {
+      gridCells.add(Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          alignment: Alignment.center,
+          child: Text(h,
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 13, color: muted))));
+    }
+
+    // Empty lead-in spaces
+    for (int i = 1; i < startWeekday; i++) {
+      gridCells.add(const SizedBox());
+    }
+
+    // Month days
+    for (int dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+      final d = DateTime(week.year, week.month, dayNum);
+      final daySessions = data.where((s) {
+        final dt =
+            tz.TZDateTime.from(DateTime.parse(s['startsAt'] as String), zone);
+        return dt.year == d.year && dt.month == d.month && dt.day == d.day;
+      }).toList();
+      final isToday =
+          d.year == now.year && d.month == now.month && d.day == now.day;
+
+      gridCells.add(InkWell(
+          onTap: () => setState(() {
+                selectedDate = d;
+                viewMode = 'DAY';
+              }),
+          child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                  color: isToday ? sageLight : Colors.white,
+                  border: Border.all(color: sageBorder.withValues(alpha: 0.5)),
+                  borderRadius: BorderRadius.circular(4)),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('$dayNum',
+                        style: TextStyle(
+                            fontWeight:
+                                isToday ? FontWeight.bold : FontWeight.normal,
+                            color: isToday ? sageGreen : ink,
+                            fontSize: 12)),
+                    const SizedBox(height: 4),
+                    for (final s in daySessions.take(2))
+                      Container(
+                          margin: const EdgeInsets.only(bottom: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 2),
+                          decoration: BoxDecoration(
+                              color: sageGreen.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(2)),
+                          child: Text(s['title'] as String,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 10, color: sageGreen))),
+                    if (daySessions.length > 2)
+                      Text('+${daySessions.length - 2} more',
+                          style: const TextStyle(
+                              fontSize: 9,
+                              color: muted,
+                              fontWeight: FontWeight.bold))
+                  ]))));
+    }
+
+    return GridView.count(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: 7,
+        childAspectRatio: 1.1,
+        children: gridCells);
   }
 
   Widget dayColumn(int day, List<dynamic> data, DateTime now) {
@@ -616,8 +977,8 @@ class _StudioScreenState extends State<StudioScreen> {
       Container(
           padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: BoxDecoration(
-              color: today ? const Color(0xFFEDE1F6) : Colors.white,
-              borderRadius: BorderRadius.circular(9)),
+              color: today ? sageLight : Colors.white,
+              borderRadius: BorderRadius.circular(4)),
           child: Text(DateFormat('EEE  d').format(d),
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -642,7 +1003,7 @@ class _StudioScreenState extends State<StudioScreen> {
         padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
             color: chakra[color].withValues(alpha: 0.09),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(4),
             border: Border(top: BorderSide(color: chakra[color], width: 3))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(
@@ -915,8 +1276,9 @@ class _StudioScreenState extends State<StudioScreen> {
               'Your recorded attendance')
         ]),
         const SizedBox(height: 28),
-        const Text('Class credit history',
-            style: TextStyle(fontSize: 22, fontFamily: 'serif')),
+        Text('Class credit history',
+            style: GoogleFonts.cinzel(
+                fontSize: 20, fontWeight: FontWeight.w600, color: ink)),
         const SizedBox(height: 16),
         if (ledger.isEmpty)
           empty('Ask the studio to add your class package.',
@@ -930,8 +1292,9 @@ class _StudioScreenState extends State<StudioScreen> {
                       '${(l['delta'] as int) > 0 ? '+' : ''}${l['delta']}',
                       style: const TextStyle(color: plum, fontSize: 20)))),
         const SizedBox(height: 26),
-        const Text('Attendance',
-            style: TextStyle(fontSize: 22, fontFamily: 'serif')),
+        Text('Attendance',
+            style: GoogleFonts.cinzel(
+                fontSize: 20, fontWeight: FontWeight.w600, color: ink)),
         const SizedBox(height: 14),
         if (!bookings.any((b) => b['attendance'] != 'UNMARKED'))
           empty('Attendance appears after your instructor records it.',
@@ -952,15 +1315,17 @@ class _StudioScreenState extends State<StudioScreen> {
                     'Add instructor',
                     const [
                       FieldSpec('name', 'Full name'),
+                      FieldSpec('phone', 'Phone number'),
                       FieldSpec('email', 'Account email'),
                       FieldSpec('specialty', 'Specialty'),
-                      FieldSpec('bio', 'About the instructor', multiline: true)
+                      FieldSpec('bio', 'Description (optional)',
+                          multiline: true, optional: true)
                     ],
                     'instructors'),
                 icon: const Icon(Icons.add),
                 label: const Text('Add instructor'))),
         if (instructors.isEmpty)
-          empty('Add your first instructor to create pole classes.',
+          empty('Add your first instructor to create yoga classes.',
               Icons.people_outline),
         for (final i in instructors)
           Padding(
@@ -972,13 +1337,30 @@ class _StudioScreenState extends State<StudioScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(i['name'] as String,
-                                style: const TextStyle(
-                                    fontSize: 22, fontFamily: 'serif')),
+                                style: GoogleFonts.cinzel(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                    color: ink)),
                             const SizedBox(height: 8),
                             Text(i['specialty'] as String,
                                 style: const TextStyle(color: plum)),
-                            const SizedBox(height: 12),
-                            Text(i['bio'] as String),
+                            if (i['phone'] != null &&
+                                (i['phone'] as String).isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Row(children: [
+                                const Icon(Icons.phone_outlined,
+                                    size: 16, color: muted),
+                                const SizedBox(width: 6),
+                                Text(i['phone'] as String,
+                                    style: const TextStyle(
+                                        fontSize: 14, color: ink)),
+                              ]),
+                            ],
+                            if (i['bio'] != null &&
+                                (i['bio'] as String).isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Text(i['bio'] as String),
+                            ],
                             const SizedBox(height: 16),
                             Text(
                                 '${i['classesTaught']} classes taught · ${i['autoAccept'] == true ? 'Auto-accept on' : 'Manual acceptance'}',
@@ -1074,8 +1456,11 @@ class _StudioScreenState extends State<StudioScreen> {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Share something new.',
-                          style: TextStyle(fontSize: 25, fontFamily: 'serif')),
+                      Text('Share something new.',
+                          style: GoogleFonts.cinzel(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              color: ink)),
                       const SizedBox(height: 12),
                       const Text(
                           'Publish an in-app campaign notification to every member.'),
@@ -1226,7 +1611,7 @@ class _StudioScreenState extends State<StudioScreen> {
               padding: const EdgeInsets.only(bottom: 12),
               child: Card(
                   color: n['readAt'] == null
-                      ? const Color(0xFFF4EEF9)
+                      ? const Color(0xFFF0EDE6)
                       : Colors.white,
                   child: ListTile(
                       contentPadding: const EdgeInsets.all(20),

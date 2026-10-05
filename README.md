@@ -41,6 +41,9 @@ In another terminal:
 cd frontend
 flutter pub get
 flutter run -d chrome --web-port 8080 --dart-define=API_URL=http://localhost:3000/api
+
+flutter run \
+  --dart-define=API_URL=http://192.168.1.100:3000/api
 ```
 
 For Android emulator use `http://10.0.2.2:3000/api`. For a physical device use your development machine's LAN address. Production builds must use an HTTPS API.

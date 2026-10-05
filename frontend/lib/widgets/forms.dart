@@ -6,14 +6,15 @@ class FieldSpec {
   final String keyName, title;
   final String initial;
   final Map<String, String>? options;
-  final bool number, dateTime, optional, multiline;
+  final bool number, dateTime, optional, multiline, boolean;
   const FieldSpec(this.keyName, this.title,
       {this.initial = '',
       this.options,
       this.number = false,
       this.dateTime = false,
       this.optional = false,
-      this.multiline = false});
+      this.multiline = false,
+      this.boolean = false});
 }
 
 Future<bool?> showStudioForm(BuildContext context,
@@ -99,7 +100,9 @@ class _StudioFormState extends State<StudioForm> {
       for (final f in widget.fields) {
         final v = controllers[f.keyName]!.text.trim();
         if (v.isEmpty && f.optional) continue;
-        if (f.dateTime) {
+        if (f.boolean) {
+          data[f.keyName] = v.toLowerCase() == 'true';
+        } else if (f.dateTime) {
           final d = DateFormat('yyyy-MM-dd HH:mm').parseStrict(v);
           data[f.keyName] = tz.TZDateTime(tz.getLocation(widget.timezone),
                   d.year, d.month, d.day, d.hour, d.minute)
@@ -134,7 +137,18 @@ class _StudioFormState extends State<StudioForm> {
                         for (final f in widget.fields)
                           Padding(
                               padding: const EdgeInsets.only(bottom: 16),
-                              child: f.options != null
+                              child: f.boolean
+                                  ? SwitchListTile(
+                                      title: Text(f.title),
+                                      value: controllers[f.keyName]!.text.toLowerCase() == 'true',
+                                      contentPadding: EdgeInsets.zero,
+                                      onChanged: busy
+                                          ? null
+                                          : (val) => setState(() {
+                                                controllers[f.keyName]!.text =
+                                                    val.toString();
+                                              }))
+                                  : f.options != null
                                   ? DropdownButtonFormField<String>(
                                       initialValue:
                                           controllers[f.keyName]!.text.isEmpty

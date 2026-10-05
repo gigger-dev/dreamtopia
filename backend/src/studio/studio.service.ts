@@ -120,12 +120,18 @@ export class StudioService {
         throw new ConflictException(
           "The studio already has a session at that time.",
         );
+      const { requireConfirmation, ...sessionData } = d;
+      const needsConfirmation =
+        i &&
+        (requireConfirmation !== undefined
+          ? requireConfirmation
+          : !i.autoAccept);
       const session = await tx.session.create({
         data: {
-          ...d,
+          ...sessionData,
           ...w,
           capacity: d.type === "RENTAL" ? 1 : d.capacity,
-          status: i && !i.autoAccept ? "PENDING_INSTRUCTOR" : "SCHEDULED",
+          status: needsConfirmation ? "PENDING_INSTRUCTOR" : "SCHEDULED",
         },
       });
       if (i?.userId)
@@ -133,7 +139,7 @@ export class StudioService {
           tx,
           i.userId,
           "New class assignment",
-          `${d.title} has been approved by admin.${i.autoAccept ? " You accepted automatically." : " Please accept it in your calendar."}`,
+          `${d.title} has been approved by admin.${!needsConfirmation ? " No confirmation needed." : " Please accept it in your calendar."}`,
         );
       return session;
     });

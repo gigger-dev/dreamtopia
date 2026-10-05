@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../api.dart';
 import '../theme.dart';
 
@@ -70,20 +71,21 @@ class _LoginScreenState extends State<LoginScreen> {
                                       CrossAxisAlignment.stretch,
                                   children: [
                                     const Icon(Icons.auto_awesome_outlined,
-                                        color: plum, size: 42),
+                                        color: plum, size: 38),
                                     const SizedBox(height: 14),
-                                    const Text('dreamtopia',
+                                    Text('Dreamtopia',
                                         textAlign: TextAlign.center,
-                                        style: TextStyle(
-                                            fontFamily: 'serif',
-                                            fontSize: 38,
+                                        style: GoogleFonts.cinzel(
+                                            fontSize: 36,
+                                            fontWeight: FontWeight.bold,
                                             color: plum)),
-                                    const SizedBox(height: 10),
-                                    const Text('POLE & MOVEMENT STUDIO',
+                                    const SizedBox(height: 8),
+                                    Text('Yoga & Movement Studio',
                                         textAlign: TextAlign.center,
-                                        style: TextStyle(
+                                        style: GoogleFonts.lato(
                                             fontSize: 11,
-                                            letterSpacing: 2,
+                                            letterSpacing: 1.6,
+                                            fontWeight: FontWeight.w600,
                                             color: muted)),
                                     const SizedBox(height: 24),
                                     const ChakraLine(),

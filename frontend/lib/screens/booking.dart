@@ -131,9 +131,45 @@ class _BookingDialogState extends State<BookingDialog> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                    Text(widget.session['description']?.toString() ?? '',
-                        style: const TextStyle(color: muted)),
-                    const SizedBox(height: 18),
+                    Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                            color: sageLight,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: sageBorder)),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                const Icon(Icons.person_outline,
+                                    size: 16, color: sageGreen),
+                                const SizedBox(width: 6),
+                                Text(
+                                    widget.session['instructor']?['name']
+                                            ?.toString() ??
+                                        'Dreamtopia Studio',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14)),
+                              ]),
+                              const SizedBox(height: 4),
+                              Row(children: [
+                                const Icon(Icons.schedule,
+                                    size: 16, color: muted),
+                                const SizedBox(width: 6),
+                                Text(
+                                    '${DateFormat('EEE, d MMM · HH:mm').format(DateTime.parse(widget.session['startsAt'] as String))} – ${DateFormat('HH:mm').format(DateTime.parse(widget.session['endsAt'] as String))}',
+                                    style: const TextStyle(
+                                        fontSize: 13, color: muted)),
+                              ]),
+                            ])),
+                    const SizedBox(height: 14),
+                    if (widget.session['description'] != null &&
+                        (widget.session['description'] as String).isNotEmpty) ...[
+                      Text(widget.session['description'] as String,
+                          style: const TextStyle(color: muted, fontSize: 13)),
+                      const SizedBox(height: 14),
+                    ],
                     DropdownButtonFormField<String>(
                         initialValue: method,
                         decoration:
@@ -186,7 +222,7 @@ class _BookingDialogState extends State<BookingDialog> {
                         Padding(
                             padding: const EdgeInsets.only(top: 12),
                             child: ClipRRect(
-                                borderRadius: BorderRadius.circular(10),
+                                borderRadius: BorderRadius.circular(4),
                                 child: Image.memory(bytes!,
                                     height: 140,
                                     fit: BoxFit.contain,

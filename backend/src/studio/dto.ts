@@ -24,6 +24,7 @@ export class SessionDto {
   @IsString() @MaxLength(60) level!: string;
   @IsOptional() @IsString() @MaxLength(2000) description?: string;
   @IsOptional() @IsUUID() instructorId?: string;
+  @IsOptional() @IsBoolean() requireConfirmation?: boolean;
 }
 export class BookingDto {
   @IsUUID() sessionId!: string;
@@ -34,7 +35,8 @@ export class BookingDto {
 export class InstructorDto {
   @IsString() @MinLength(2) @MaxLength(80) name!: string;
   @IsEmail() email!: string;
-  @IsString() @MaxLength(2000) bio!: string;
+  @IsOptional() @IsString() @MaxLength(30) phone?: string;
+  @IsOptional() @IsString() @MaxLength(2000) bio?: string;
   @IsString() @MaxLength(100) specialty!: string;
 }
 export class AutoDto {
