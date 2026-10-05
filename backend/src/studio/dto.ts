@@ -31,6 +31,25 @@ export class SessionDto {
   @IsOptional() @IsBoolean() requireConfirmation?: boolean;
 }
 
+export class UpdateSessionDto {
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(100) title?: string;
+  @IsOptional() @IsEnum(SessionType) type?: SessionType;
+  @IsOptional() @IsEnum(BookingMode) bookingMode?: BookingMode;
+  @IsOptional() @IsInt() @Min(1) @Max(20) creditCost?: number;
+  @IsOptional() @IsDateString() startsAt?: string;
+  @IsOptional() @IsDateString() endsAt?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(50) capacity?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(100000000) price?: number;
+  @IsOptional() @IsString() @MaxLength(60) level?: string;
+  @IsOptional() @IsString() @MaxLength(2000) description?: string;
+  @IsOptional() @IsUUID() instructorId?: string;
+  @IsOptional() @IsBoolean() requireConfirmation?: boolean;
+}
+
+export class DeclineSessionDto {
+  @IsOptional() @IsString() @MaxLength(500) reason?: string;
+}
+
 export class BookingDto {
   @IsUUID() sessionId!: string;
   @IsEnum(PaymentMethod) paymentMethod!: PaymentMethod;

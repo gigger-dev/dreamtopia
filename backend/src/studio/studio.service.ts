@@ -37,7 +37,7 @@ export class StudioService {
       );
     return i;
   }
-  private window(s: string, e: string) {
+  private window(s: string | Date, e: string | Date) {
     const startsAt = new Date(s),
       endsAt = new Date(e);
     if (!validWindow(startsAt, endsAt))
@@ -161,6 +161,188 @@ export class StudioService {
       });
     });
   }
+
+  async decline(a: Actor, id: string, reason?: string) {
+    return this.db.serial(async (tx) => {
+      const i = await this.instructor(a, tx);
+      const s = await tx.session.findUnique({ where: { id } });
+      if (!s || s.instructorId !== i.id) throw new ForbiddenException();
+      if (s.status !== "PENDING_INSTRUCTOR" || s.startsAt <= new Date())
+        throw new BadRequestException(
+          "This class is no longer awaiting response.",
+        );
+
+      const updated = await tx.session.update({
+        where: { id },
+        data: {
+          instructorId: null, // Unassign instructor so admin can reassign
+          status: "PENDING_INSTRUCTOR",
+        },
+      });
+
+      // Notify studio admins of instructor decline
+      const admins = await tx.user.findMany({ where: { role: "ADMIN" } });
+      for (const admin of admins) {
+        await this.notify(
+          tx,
+          admin.id,
+          "Class declined by instructor",
+          `${i.name} declined ${s.title}.${reason ? " Reason: " + reason : ""}`,
+        );
+      }
+
+      return updated;
+    });
+  }
+
+  async updateSession(id: string, d: D.UpdateSessionDto) {
+    return this.db.serial(async (tx) => {
+      const s = await tx.session.findUnique({
+        where: { id },
+        include: {
+          bookings: {
+            where: { status: { in: ["PENDING", "CONFIRMED", "PAID_AWAITING_RESOLUTION"] } },
+          },
+        },
+      });
+      if (!s || s.deletedAt) throw new NotFoundException("Session not found");
+      if (s.status === "COMPLETED" || s.status === "CANCELLED")
+        throw new BadRequestException("Cannot edit a completed or cancelled session.");
+
+      const activeBookingsCount = s.bookings.filter((b) => b.status === "CONFIRMED").length;
+
+      // AC14: Capacity cannot be reduced below active enrollments
+      if (d.capacity !== undefined && d.capacity < activeBookingsCount) {
+        throw new BadRequestException(
+          `Cannot reduce capacity to ${d.capacity}. There are currently ${activeBookingsCount} confirmed bookings.`,
+        );
+      }
+
+      // Check window / time update
+      const newStartsAt = d.startsAt ? new Date(d.startsAt) : s.startsAt;
+      const newEndsAt = d.endsAt ? new Date(d.endsAt) : s.endsAt;
+      const w = this.window(newStartsAt, newEndsAt);
+
+      const timeChanged =
+        newStartsAt.getTime() !== s.startsAt.getTime() ||
+        newEndsAt.getTime() !== s.endsAt.getTime();
+
+      // Check studio room overlap (excluding current session)
+      if (
+        await tx.session.count({
+          where: {
+            id: { not: s.id },
+            deletedAt: null,
+            status: { in: ["SCHEDULED", "PENDING_INSTRUCTOR"] },
+            startsAt: { lt: w.endsAt },
+            endsAt: { gt: w.startsAt },
+          },
+        })
+      ) {
+        throw new ConflictException("The studio room already has another session at this time.");
+      }
+
+      // Check instructor
+      const targetInstructorId =
+        d.instructorId !== undefined ? d.instructorId : s.instructorId;
+
+      let targetInstructor = null;
+      if (targetInstructorId) {
+        targetInstructor = await tx.instructor.findUnique({
+          where: { id: targetInstructorId },
+        });
+        if (!targetInstructor)
+          throw new BadRequestException("Instructor not found.");
+
+        // Check if instructor has blocks during new window
+        if (
+          await tx.unavailableSlot.count({
+            where: {
+              instructorId: targetInstructor.id,
+              startsAt: { lt: w.endsAt },
+              endsAt: { gt: w.startsAt },
+            },
+          })
+        ) {
+          throw new ConflictException(
+            "The instructor has blocked unavailable time during this slot.",
+          );
+        }
+
+        // Check if instructor has other sessions during new window
+        if (
+          await tx.session.count({
+            where: {
+              id: { not: s.id },
+              instructorId: targetInstructor.id,
+              status: { in: ["SCHEDULED", "PENDING_INSTRUCTOR"] },
+              startsAt: { lt: w.endsAt },
+              endsAt: { gt: w.startsAt },
+            },
+          })
+        ) {
+          throw new ConflictException(
+            "The instructor already has another class assigned during this time.",
+          );
+        }
+      }
+
+      const instructorChanged = targetInstructorId !== s.instructorId;
+
+      // Status determination if instructor/time changed
+      let newStatus = s.status;
+      if (targetInstructor) {
+        if (instructorChanged || timeChanged) {
+          const needsConfirmation =
+            d.requireConfirmation !== undefined
+              ? d.requireConfirmation
+              : !targetInstructor.autoAccept;
+          newStatus = needsConfirmation ? "PENDING_INSTRUCTOR" : "SCHEDULED";
+        }
+      }
+
+      const updated = await tx.session.update({
+        where: { id },
+        data: {
+          title: d.title ?? s.title,
+          type: d.type ?? s.type,
+          bookingMode: d.bookingMode ?? s.bookingMode,
+          creditCost: d.creditCost ?? s.creditCost,
+          capacity: d.capacity ?? s.capacity,
+          price: d.price ?? s.price,
+          level: d.level ?? s.level,
+          description: d.description ?? s.description,
+          instructorId: targetInstructorId,
+          status: newStatus,
+          ...w,
+        },
+      });
+
+      // AC14: Notify affected users on material schedule changes
+      if (timeChanged) {
+        for (const b of s.bookings) {
+          await this.notify(
+            tx,
+            b.memberId,
+            "Schedule update: " + updated.title,
+            `The time for ${updated.title} was changed to ${this.window(updated.startsAt, updated.endsAt).startsAt.toISOString()}. You can attend or cancel without penalty.`,
+          );
+        }
+      }
+
+      if (targetInstructor?.userId && (instructorChanged || timeChanged)) {
+        await this.notify(
+          tx,
+          targetInstructor.userId,
+          "Session assignment updated",
+          `${updated.title} schedule or assignment was updated. Status: ${newStatus}.`,
+        );
+      }
+
+      return updated;
+    });
+  }
+
   private async restoreCredit(
     tx: Tx,
     b: { id: string; memberId: string; creditReserved: boolean; packageId?: string | null; creditsUsed?: number },

@@ -66,11 +66,24 @@ export class StudioController {
   ) {
     return this.service.cancelSession(id, true);
   }
+  @Roles("ADMIN") @Patch("sessions/:id") updateSession(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() d: D.UpdateSessionDto,
+  ) {
+    return this.service.updateSession(id, d);
+  }
   @Roles("INSTRUCTOR") @Post("sessions/:id/accept") accept(
     @Req() r: AuthRequest,
     @Param("id", ParseUUIDPipe) id: string,
   ) {
     return this.service.accept(r.user, id);
+  }
+  @Roles("INSTRUCTOR") @Post("sessions/:id/decline") decline(
+    @Req() r: AuthRequest,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() d: D.DeclineSessionDto,
+  ) {
+    return this.service.decline(r.user, id, d.reason);
   }
   @Roles("ADMIN", "INSTRUCTOR") @Post("sessions/:id/complete") complete(
     @Req() r: AuthRequest,

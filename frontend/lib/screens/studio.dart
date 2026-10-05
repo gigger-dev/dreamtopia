@@ -1103,12 +1103,44 @@ class _StudioScreenState extends State<StudioScreen> {
                     : null,
                 child: const Text('Book session ↗')),
           if (teacher && s['status'] == 'PENDING_INSTRUCTOR')
-            TextButton(
-                onPressed: busy
-                    ? null
-                    : () => action('sessions/${s['id']}/accept',
-                        success: 'Class accepted'),
-                child: const Text('Accept class')),
+            Wrap(spacing: 8, children: [
+              TextButton(
+                  onPressed: busy
+                      ? null
+                      : () => action('sessions/${s['id']}/accept',
+                          success: 'Class accepted'),
+                  child: const Text('Accept class')),
+              TextButton(
+                  onPressed: busy
+                      ? null
+                      : () async {
+                          final reasonCtrl = TextEditingController();
+                          final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                    title: const Text('Decline Class Invitation'),
+                                    content: TextField(
+                                      controller: reasonCtrl,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Reason for declining (optional)'),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                          onPressed: () => Navigator.pop(ctx, false),
+                                          child: const Text('Cancel')),
+                                      FilledButton(
+                                          onPressed: () => Navigator.pop(ctx, true),
+                                          child: const Text('Decline')),
+                                    ],
+                                  ));
+                          if (confirmed == true) {
+                            await action('sessions/${s['id']}/decline',
+                                body: {'reason': reasonCtrl.text.trim()},
+                                success: 'Class declined');
+                          }
+                        },
+                  child: const Text('Decline', style: TextStyle(color: Colors.red))),
+            ]),
           if ((admin || teacher) &&
               s['status'] == 'SCHEDULED' &&
               DateTime.parse(s['endsAt'] as String).isBefore(DateTime.now()))
@@ -1119,7 +1151,58 @@ class _StudioScreenState extends State<StudioScreen> {
                         success: 'Class completed'),
                 child: const Text('Mark taught')),
           if (admin && s['status'] != 'COMPLETED')
-            Wrap(children: [
+            Wrap(spacing: 8, children: [
+              TextButton(
+                  onPressed: busy
+                      ? null
+                      : () => form(
+                            'Edit session',
+                            [
+                              FieldSpec('title', 'Session name', initial: s['title'] as String),
+                              FieldSpec('type', 'Session type',
+                                  initial: s['type'] as String, options: sessionTypes),
+                              FieldSpec('bookingMode', 'Allowed booking modes',
+                                  initial: (s['bookingMode'] as String?) ?? 'BOTH',
+                                  options: {
+                                    'BOTH': 'Both (Package credits or Walk-in)',
+                                    'PACKAGE_ONLY': 'Package credits only',
+                                    'WALK_IN_ONLY': 'Walk-in only (Bank transfer)'
+                                  }),
+                              FieldSpec('creditCost', 'Credit cost (for package booking)',
+                                  number: true, initial: '${s['creditCost'] ?? 1}'),
+                              FieldSpec('startsAt', 'Starts at',
+                                  dateTime: true,
+                                  initial: DateFormat('yyyy-MM-dd HH:mm').format(
+                                      tz.TZDateTime.from(
+                                          DateTime.parse(s['startsAt'] as String), zone))),
+                              FieldSpec('endsAt', 'Ends at',
+                                  dateTime: true,
+                                  initial: DateFormat('yyyy-MM-dd HH:mm').format(
+                                      tz.TZDateTime.from(
+                                          DateTime.parse(s['endsAt'] as String), zone))),
+                              FieldSpec('capacity', 'Number of places',
+                                  number: true, initial: '${s['capacity']}'),
+                              FieldSpec('price', 'Walk-in Price (${settings['currency']})',
+                                  number: true, initial: '${s['price']}'),
+                              FieldSpec('level', 'Level', initial: s['level'] as String),
+                              FieldSpec('instructorId', 'Instructor',
+                                  optional: true,
+                                  initial: (s['instructor']?['id'] as String?) ?? '',
+                                  options: {
+                                    for (final i in instructors)
+                                      i['id'] as String: i['name'] as String
+                                  }),
+                              FieldSpec('description', 'About this session',
+                                  multiline: true,
+                                  optional: true,
+                                  initial: (s['description'] as String?) ?? ''),
+                            ],
+                            'sessions/${s['id']}',
+                            method: 'PATCH',
+                            note:
+                                'Material schedule updates notify enrolled members. Capacity cannot be reduced below active bookings.',
+                          ),
+                  child: const Text('Edit')),
               TextButton(
                   onPressed: busy
                       ? null
