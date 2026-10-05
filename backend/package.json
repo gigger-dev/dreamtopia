@@ -10,6 +10,8 @@
     "db:migrate": "prisma migrate deploy",
     "db:dev": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "db:clean": "npx prisma migrate reset --force --skip-seed",
+    "db:reset": "npm run db:seed",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "test:integration": "node --import tsx --test test/integration/*.test.ts"
