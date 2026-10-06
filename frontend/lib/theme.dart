@@ -155,7 +155,7 @@ class StatusBadge extends StatelessWidget {
     if (status == 'NO_SHOW') {
       text = 'No-Show';
     } else if (status == 'PENDING_INSTRUCTOR') {
-      text = 'Needs Instructor Confirmation';
+      text = 'Pending Instructor';
     } else if (status == 'SCHEDULED') {
       text = 'Confirmed / Scheduled';
     } else if (status == 'PAID_AWAITING_RESOLUTION') {

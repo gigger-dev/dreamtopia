@@ -51,7 +51,7 @@ class _BookingsViewState extends State<BookingsView> {
     }).toList();
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         studioHeading(
           context,
@@ -86,92 +86,227 @@ class _BookingsViewState extends State<BookingsView> {
             'No bookings found matching filter.',
             Icons.confirmation_number_outlined,
           ),
-        for (final b in filteredBookings)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(spacing: 12, runSpacing: 10, children: [
+        for (int idx = 0; idx < filteredBookings.length; idx++)
+          LayoutBuilder(builder: (context, constraints) {
+            final b = filteredBookings[idx];
+            final accentColor = chakra[idx % chakra.length];
+              // 2/3 width on wide screens, full width on compact/mobile screens
+              final cardWidth = constraints.maxWidth >= 700
+                  ? constraints.maxWidth * (2 / 3)
+                  : double.infinity;
+
+              return Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  width: cardWidth,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: sageBorder.withValues(alpha: 0.6)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        border: Border(
+                          left: BorderSide(color: accentColor, width: 4),
+                        ),
+                      ),
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Header: Time on one side, Badges on other side (responsive wrap to never overflow)
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 8,
+                            alignment: WrapAlignment.spaceBetween,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.schedule, size: 15, color: accentColor),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    widget.onFormatDate(b['session']['startsAt']),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: ink.withValues(alpha: 0.8),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  StatusBadge(b['status'] as String),
+                                  StatusBadge(b['attendance'] as String),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+
+                      // Session Title
                       Text(
                         b['session']['title'] as String,
                         style: const TextStyle(
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.bold,
                           fontSize: 18,
+                          color: ink,
                         ),
                       ),
-                      StatusBadge(b['status'] as String),
-                      StatusBadge(b['attendance'] as String),
-                    ]),
-                    const SizedBox(height: 10),
-                    Text(
-                      widget.onFormatDate(b['session']['startsAt']),
-                      style: const TextStyle(color: muted, fontSize: 14),
-                    ),
-                    if (!widget.member) Text(b['member']['name'] as String),
-                    const SizedBox(height: 8),
-                    Text(
-                      b['paymentMethod'] == 'CREDITS'
-                          ? '1 class credit'
-                          : _money(b['amount']),
-                      style: const TextStyle(color: plum, fontSize: 14),
-                    ),
-                    if (b['rejectionReason'] != null)
-                      Text(b['rejectionReason'] as String),
-                    if (b['overrideReason'] != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
+                      const SizedBox(height: 8),
+
+                      // Member & Payment Metadata Row
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          if (!widget.member)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.person_outline, size: 14, color: muted),
+                                const SizedBox(width: 4),
+                                Text(
+                                  b['member']['name'] as String,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: ink,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: plum.withValues(alpha: 0.07),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: plum.withValues(alpha: 0.18)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.payments_outlined, size: 13, color: plum),
+                                const SizedBox(width: 4),
+                                Text(
+                                  b['paymentMethod'] == 'CREDITS'
+                                      ? '1 class credit'
+                                      : _money(b['amount']),
+                                  style: const TextStyle(
+                                    color: plum,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (b['rejectionReason'] != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'Rejection Reason: ${b['rejectionReason']}',
+                            style: TextStyle(fontSize: 12, color: Colors.red.shade800),
+                          ),
+                        ),
+                      ],
+                      if (b['overrideReason'] != null) ...[
+                        const SizedBox(height: 6),
+                        Text(
                           'Note: ${b['overrideReason']}',
                           style: const TextStyle(fontSize: 13, color: muted),
                         ),
-                      ),
-                    const SizedBox(height: 12),
-                    Wrap(spacing: 8, runSpacing: 8, children: [
-                      if (b['proofId'] != null && (widget.admin || widget.member))
-                        OutlinedButton.icon(
-                          onPressed: () => widget.onViewProof(b['proofId'] as String),
-                          icon: const Icon(Icons.receipt_long_outlined, size: 17),
-                          label: const Text('Payment proof'),
-                        ),
-                      if (widget.admin && b['status'] == 'PENDING') ...[
-                        FilledButton(
-                          onPressed: widget.busy
-                              ? null
-                              : () async {
-                                  if (await confirm(
-                                    context,
-                                    'Confirm this booking?',
-                                    b['paymentMethod'] == 'CREDITS'
-                                        ? 'Confirm this member’s reserved class credit?'
-                                        : 'Confirm only after you have verified the payment screenshot against your bank records.',
-                                  )) {
-                                    await widget.onAction(
-                                      'bookings/${b['id']}/approve',
-                                      success: 'Booking confirmed',
-                                    );
-                                  }
-                                },
-                          child: const Text('Confirm'),
-                        ),
-                        OutlinedButton(
-                          onPressed: widget.busy
-                              ? null
-                              : () => widget.onForm(
-                                    'Reject booking',
-                                    const [
-                                      FieldSpec('reason', 'Reason for rejection',
-                                          multiline: true)
-                                    ],
-                                    'bookings/${b['id']}/reject',
-                                    submit: 'Reject booking',
-                                  ),
-                          child: const Text('Reject'),
-                        ),
                       ],
+                      // Cancellation notice (if applicable)
+                      if (widget.member &&
+                          ['PENDING', 'CONFIRMED'].contains(b['status']))
+                        const Padding(
+                          padding: EdgeInsets.only(top: 8, bottom: 4),
+                          child: Text(
+                            'Cancellation closes 24 hours before the session.',
+                            style: TextStyle(fontSize: 12, color: muted),
+                          ),
+                        ),
+                      const SizedBox(height: 12),
+                      const Divider(height: 1),
+                      const SizedBox(height: 10),
+
+                      // Actions Row aligned to the end (trailing side) of the card
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          alignment: WrapAlignment.end,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                          if (b['proofId'] != null && (widget.admin || widget.member))
+                            OutlinedButton.icon(
+                              onPressed: () => widget.onViewProof(b['proofId'] as String),
+                              icon: const Icon(Icons.receipt_long_outlined, size: 16),
+                              label: const Text('Payment proof'),
+                            ),
+                          if (widget.admin && b['status'] == 'PENDING') ...[
+                            FilledButton.icon(
+                              onPressed: widget.busy
+                                  ? null
+                                  : () async {
+                                      if (await confirm(
+                                        context,
+                                        'Confirm this booking?',
+                                        b['paymentMethod'] == 'CREDITS'
+                                            ? 'Confirm this member’s reserved class credit?'
+                                            : 'Confirm only after you have verified the payment screenshot against your bank records.',
+                                      )) {
+                                        await widget.onAction(
+                                          'bookings/${b['id']}/approve',
+                                          success: 'Booking confirmed',
+                                        );
+                                      }
+                                    },
+                              icon: const Icon(Icons.check, size: 15),
+                              label: const Text('Confirm'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: widget.busy
+                                  ? null
+                                  : () => widget.onForm(
+                                        'Reject booking',
+                                        const [
+                                          FieldSpec('reason', 'Reason for rejection',
+                                              multiline: true)
+                                        ],
+                                        'bookings/${b['id']}/reject',
+                                        submit: 'Reject booking',
+                                      ),
+                              icon: const Icon(Icons.close, size: 15),
+                              label: const Text('Reject'),
+                            ),
+                          ],
                       if (widget.admin && b['status'] == 'PAID_AWAITING_RESOLUTION') ...[
                         FilledButton.icon(
                           onPressed: widget.busy
@@ -296,22 +431,17 @@ class _BookingsViewState extends State<BookingsView> {
                           child: const Text('Clear'),
                         ),
                       ],
-                    ]),
-                    if (widget.member &&
-                        ['PENDING', 'CONFIRMED'].contains(b['status']))
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8),
-                        child: Text(
-                          'Cancellation closes 24 hours before the session.',
-                          style: TextStyle(fontSize: 12, color: muted),
-                        ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
-      ],
+        ),
+      ),
     );
+  }),
+],
+);
   }
 }

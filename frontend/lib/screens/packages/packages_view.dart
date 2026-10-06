@@ -43,9 +43,10 @@ class PackagesView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
         studioHeading(
           context,
           'PACKAGES & PASSES',
@@ -88,56 +89,120 @@ class PackagesView extends StatelessWidget {
         const SizedBox(height: 14),
         if (packageProducts.isEmpty)
           studioEmpty('No packages currently offered.', Icons.card_membership_outlined),
-        for (final p in packageProducts)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            p['name'] as String,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 18,
+        LayoutBuilder(builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 750;
+          return Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              for (int i = 0; i < packageProducts.length; i++) ...[
+                Builder(builder: (context) {
+                  final p = packageProducts[i];
+                  final itemWidth = isWide ? (constraints.maxWidth - 16) / 2 : double.infinity;
+                  return Container(
+                    width: itemWidth,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: sageBorder.withValues(alpha: 0.8)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.03),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                p['name'] as String,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
+                                  color: ink,
+                                ),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '${p['credits']} credits · ${_money(p['price'])} · Valid ${p['validityDays']} days',
-                            style: const TextStyle(
-                              color: plum,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          if (p['description'] != null &&
-                              (p['description'] as String).isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              p['description'] as String,
-                              style: const TextStyle(color: muted, fontSize: 13),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: sageGreen,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '${p['credits']} Credits',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              _money(p['price']),
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: plum,
+                              ),
+                            ),
+                            Text(
+                              '· Valid ${p['validityDays']} days',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: muted,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (p['description'] != null &&
+                            (p['description'] as String).isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            p['description'] as String,
+                            style: const TextStyle(color: muted, fontSize: 13, height: 1.3),
+                          ),
                         ],
-                      ),
+                        if (member) ...[
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                              onPressed: busy ? null : () => onPurchasePackage(p as Map<String, dynamic>),
+                              icon: const Icon(Icons.shopping_bag_outlined, size: 16),
+                              label: const Text('Buy Package'),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                    if (member)
-                      FilledButton(
-                        onPressed: busy ? null : () => onPurchasePackage(p as Map<String, dynamic>),
-                        child: const Text('Buy Package'),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+                  );
+                }),
+              ],
+            ],
+          );
+        }),
 
-        const SizedBox(height: 32),
+        const SizedBox(height: 36),
 
         // Member Packages / Purchases Queue
         Text(
@@ -156,98 +221,216 @@ class PackagesView extends StatelessWidget {
                 : 'You haven’t bought any packages yet.',
             Icons.receipt_outlined,
           ),
-        for (final mp in packages)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(spacing: 12, runSpacing: 8, children: [
-                      Text(
-                        mp['packageProduct']?['name']?.toString() ?? 'Class Package',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 18,
-                        ),
-                      ),
-                      StatusBadge(mp['status'] as String),
-                    ]),
-                    const SizedBox(height: 10),
-                    if (admin && mp['user'] != null)
-                      Text(
-                        'Member: ${mp['user']['name']} (${mp['user']['email']})',
-                        style: const TextStyle(color: muted, fontSize: 14),
-                      ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Credits: ${mp['creditsRemaining']} / ${mp['creditsTotal']} remaining · Paid: ${_money(mp['pricePaid'])}',
-                      style: const TextStyle(fontWeight: FontWeight.w500),
+        for (int idx = 0; idx < packages.length; idx++)
+          LayoutBuilder(builder: (context, constraints) {
+            final mp = packages[idx];
+            final accentColor = chakra[idx % chakra.length];
+            final cardWidth = constraints.maxWidth >= 700
+                ? constraints.maxWidth * (2 / 3)
+                : double.infinity;
+
+            return Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                width: cardWidth,
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: sageBorder.withValues(alpha: 0.6)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
                     ),
-                    if (mp['expiresAt'] != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'Expires: ${onFormatDate(mp['expiresAt'])}',
-                        style: const TextStyle(color: muted, fontSize: 13),
-                      ),
-                    ],
-                    if (mp['rejectionReason'] != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        'Rejection reason: ${mp['rejectionReason']}',
-                        style: const TextStyle(color: Colors.red, fontSize: 13),
-                      ),
-                    ],
-                    const SizedBox(height: 14),
-                    Wrap(spacing: 8, runSpacing: 8, children: [
-                      if (mp['proofId'] != null)
-                        OutlinedButton.icon(
-                          onPressed: () => onViewProof(mp['proofId'] as String),
-                          icon: const Icon(Icons.receipt_long_outlined, size: 17),
-                          label: const Text('Payment proof'),
-                        ),
-                      if (admin && mp['status'] == 'PENDING_REVIEW') ...[
-                        FilledButton(
-                          onPressed: busy
-                              ? null
-                              : () async {
-                                  if (await confirm(
-                                    context,
-                                    'Activate package?',
-                                    'Confirm that you verified payment against bank records. Approving will activate the package and grant ${mp['creditsTotal']} credits to ${mp['user']?['name']}.',
-                                  )) {
-                                    await onAction(
-                                      'packages/${mp['id']}/approve',
-                                      success: 'Package activated and credits issued!',
-                                    );
-                                  }
-                                },
-                          child: const Text('Approve & Activate'),
-                        ),
-                        OutlinedButton(
-                          onPressed: busy
-                              ? null
-                              : () => onForm(
-                                    'Reject package purchase',
-                                    const [
-                                      FieldSpec('reason', 'Reason for rejection',
-                                          multiline: true)
-                                    ],
-                                    'packages/${mp['id']}/reject',
-                                    submit: 'Reject package',
-                                  ),
-                          child: const Text('Reject'),
-                        ),
-                      ],
-                    ]),
                   ],
                 ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: accentColor, width: 4),
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Header: Title on left, Status Badge on right
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                mp['packageProduct']?['name']?.toString() ?? 'Class Package',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 17,
+                                  color: ink,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            StatusBadge(mp['status'] as String),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+
+                        // Member details if admin
+                        if (admin && mp['user'] != null) ...[
+                          Row(
+                            children: [
+                              const Icon(Icons.person_outline, size: 14, color: muted),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${mp['user']['name']} (${mp['user']['email']})',
+                                style: const TextStyle(fontSize: 13, color: muted),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+
+                        // Credits Remaining & Price Metadata Row
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: sageGreen.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '${mp['creditsRemaining']} / ${mp['creditsTotal']} credits left',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: sageGreen,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: plum.withValues(alpha: 0.07),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.payments_outlined, size: 13, color: plum),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _money(mp['pricePaid']),
+                                    style: const TextStyle(
+                                      color: plum,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (mp['expiresAt'] != null) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(Icons.event_outlined, size: 13, color: muted),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Expires: ${onFormatDate(mp['expiresAt'])}',
+                                style: const TextStyle(color: muted, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (mp['rejectionReason'] != null) ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'Rejection reason: ${mp['rejectionReason']}',
+                              style: TextStyle(color: Colors.red.shade800, fontSize: 12),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        const Divider(height: 1),
+                        const SizedBox(height: 10),
+
+                        // Actions Row aligned to the end
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            alignment: WrapAlignment.end,
+                            children: [
+                              if (mp['proofId'] != null)
+                                OutlinedButton.icon(
+                                  onPressed: () => onViewProof(mp['proofId'] as String),
+                                  icon: const Icon(Icons.receipt_long_outlined, size: 16),
+                                  label: const Text('Payment proof'),
+                                ),
+                              if (admin && mp['status'] == 'PENDING_REVIEW') ...[
+                                FilledButton.icon(
+                                  onPressed: busy
+                                      ? null
+                                      : () async {
+                                          if (await confirm(
+                                            context,
+                                            'Activate package?',
+                                            'Confirm that you verified payment against bank records. Approving will activate the package and grant ${mp['creditsTotal']} credits to ${mp['user']?['name']}.',
+                                          )) {
+                                            await onAction(
+                                              'packages/${mp['id']}/approve',
+                                              success: 'Package activated and credits issued!',
+                                            );
+                                          }
+                                        },
+                                  icon: const Icon(Icons.check, size: 15),
+                                  label: const Text('Approve & Activate'),
+                                ),
+                                OutlinedButton.icon(
+                                  onPressed: busy
+                                      ? null
+                                      : () => onForm(
+                                            'Reject package purchase',
+                                            const [
+                                              FieldSpec('reason', 'Reason for rejection',
+                                                  multiline: true)
+                                            ],
+                                            'packages/${mp['id']}/reject',
+                                            submit: 'Reject package',
+                                          ),
+                                  icon: const Icon(Icons.close, size: 15),
+                                  label: const Text('Reject'),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-      ],
+            );
+          }),
+        ],
+      ),
     );
   }
 }
