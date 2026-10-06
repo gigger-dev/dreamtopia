@@ -6,6 +6,11 @@ This document provides a detailed breakdown of the PostgreSQL schema defined in 
 
 ## 1. Entity Relationship Diagram (ERD)
 
+![Dreamtopia Database ERD](erd_diagram.png)
+
+<details>
+<summary><b>Click to view Mermaid Diagram Source Code</b></summary>
+
 ```mermaid
 erDiagram
     User ||--o| Instructor : "has profile"
@@ -22,7 +27,7 @@ erDiagram
     PackageProduct ||--o{ MemberPackage : "instantiates"
 
     MemberPackage ||--o{ Booking : "pays for"
-    MemberPackage ||--o{ CreditLedger : "credits deducted/added"
+    MemberPackage ||--o{ CreditLedger : "credits deducted or added"
     PaymentProof ||--o| MemberPackage : "proves purchase of"
 
     Session ||--o{ Booking : "has attendees"
@@ -30,146 +35,147 @@ erDiagram
     PaymentProof ||--o| Booking : "proves walk-in payment for"
 
     User {
-        String id PK
-        String email UK
-        String name
-        String passwordHash
-        Role role
-        Int credits
-        DateTime createdAt
+        string id PK
+        string email UK
+        string name
+        string passwordHash
+        string role
+        int credits
+        date createdAt
     }
 
     Instructor {
-        String id PK
-        String userId FK,UK
-        String email UK
-        String name
-        String phone
-        String bio
-        String specialty
-        Boolean autoAccept
+        string id PK
+        string userId FK
+        string email UK
+        string name
+        string phone
+        string bio
+        string specialty
+        boolean autoAccept
     }
 
     PackageProduct {
-        String id PK
-        String name
-        String description
-        Int credits
-        Int price
-        Int validityDays
-        SessionType[] allowedTypes
-        Boolean active
-        DateTime createdAt
+        string id PK
+        string name
+        string description
+        int credits
+        int price
+        int validityDays
+        string allowedTypes
+        boolean active
+        date createdAt
     }
 
     MemberPackage {
-        String id PK
-        String userId FK
-        String packageProductId FK
-        Int creditsTotal
-        Int creditsRemaining
-        Int pricePaid
-        PackageStatus status
-        String proofId FK,UK
-        String rejectionReason
-        DateTime activatedAt
-        DateTime expiresAt
-        DateTime createdAt
+        string id PK
+        string userId FK
+        string packageProductId FK
+        int creditsTotal
+        int creditsRemaining
+        int pricePaid
+        string status
+        string proofId FK
+        string rejectionReason
+        date activatedAt
+        date expiresAt
+        date createdAt
     }
 
     Session {
-        String id PK
-        String title
-        SessionType type
-        BookingMode bookingMode
-        Int creditCost
-        DateTime startsAt
-        DateTime endsAt
-        Int capacity
-        Int price
-        String level
-        String description
-        String instructorId FK
-        SessionStatus status
-        DateTime deletedAt
-        DateTime createdAt
+        string id PK
+        string title
+        string type
+        string bookingMode
+        int creditCost
+        date startsAt
+        date endsAt
+        int capacity
+        int price
+        string level
+        string description
+        string instructorId FK
+        string status
+        date deletedAt
+        date createdAt
     }
 
     UnavailableSlot {
-        String id PK
-        String instructorId FK
-        DateTime startsAt
-        DateTime endsAt
-        String reason
+        string id PK
+        string instructorId FK
+        date startsAt
+        date endsAt
+        string reason
     }
 
     PaymentProof {
-        String id PK
-        String userId FK
-        String filename
-        String mime
-        DateTime createdAt
+        string id PK
+        string userId FK
+        string filename
+        string mime
+        date createdAt
     }
 
     Booking {
-        String id PK
-        String memberId FK
-        String sessionId FK
-        BookingStatus status
-        PaymentMethod paymentMethod
-        String packageId FK
-        Int creditsUsed
-        String proofId FK,UK
-        Int amount
-        Int discount
-        String promoCode
-        Boolean creditReserved
-        Attendance attendance
-        String rejectionReason
-        String overrideReason
-        DateTime createdAt
+        string id PK
+        string memberId FK
+        string sessionId FK
+        string status
+        string paymentMethod
+        string packageId FK
+        int creditsUsed
+        string proofId FK
+        int amount
+        int discount
+        string promoCode
+        boolean creditReserved
+        string attendance
+        string rejectionReason
+        string overrideReason
+        date createdAt
     }
 
     CreditLedger {
-        String id PK
-        String userId FK
-        String packageId FK
-        Int delta
-        String reason
-        String bookingId
-        DateTime createdAt
+        string id PK
+        string userId FK
+        string packageId FK
+        int delta
+        string reason
+        string bookingId
+        date createdAt
     }
 
     Promotion {
-        String id PK
-        String code UK
-        Int percent
-        DateTime expiresAt
-        Boolean active
+        string id PK
+        string code UK
+        int percent
+        date expiresAt
+        boolean active
     }
 
     Notification {
-        String id PK
-        String userId FK
-        String title
-        String body
-        DateTime readAt
-        String dedupeKey UK
-        DateTime createdAt
+        string id PK
+        string userId FK
+        string title
+        string body
+        date readAt
+        string dedupeKey UK
+        date createdAt
     }
 
     TimeslotRequest {
-        String id PK
-        String memberId FK
-        SessionType type
-        DateTime startsAt
-        DateTime endsAt
-        String note
-        String status
-        String response
-        DateTime createdAt
+        string id PK
+        string memberId FK
+        string type
+        date startsAt
+        date endsAt
+        string note
+        string status
+        string response
+        date createdAt
     }
 ```
+</details>
 
 ---
 
