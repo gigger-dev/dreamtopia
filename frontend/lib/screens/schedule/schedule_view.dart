@@ -226,6 +226,7 @@ class _ScheduleViewState extends State<ScheduleView> {
               bool isAccent = false,
             }) {
               return Container(
+                width: double.infinity,
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(8),
@@ -328,6 +329,7 @@ class _ScheduleViewState extends State<ScheduleView> {
               );
             } else {
               return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   card1,
                   const SizedBox(height: 12),
@@ -894,7 +896,7 @@ class _ScheduleViewState extends State<ScheduleView> {
             widget.onPeriodChanged(currentWeek, currentSelectedDate);
           }),
           child: Container(
-            padding: const EdgeInsets.all(6),
+            padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
               color: isToday ? sageGreen.withValues(alpha: 0.12) : Colors.white,
               border: Border.all(
@@ -903,39 +905,44 @@ class _ScheduleViewState extends State<ScheduleView> {
               ),
               borderRadius: BorderRadius.circular(4),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Stack(
               children: [
-                Text(
-                  '$dayNum',
-                  style: TextStyle(
-                    fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
-                    color: isToday ? sageGreen : ink,
-                    fontSize: 12,
+                Align(
+                  alignment: Alignment.topLeft,
+                  child: Text(
+                    '$dayNum',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: isToday ? sageGreen : ink,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                for (final s in daySessions.take(2))
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 2),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: sageGreen.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(2),
+                if (daySessions.isNotEmpty)
+                  Align(
+                    alignment: Alignment.bottomRight,
+                    child: Container(
+                      width: 16,
+                      height: 16,
+                      decoration: BoxDecoration(
+                        color: sageGreen.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: sageGreen.withValues(alpha: 0.35),
+                          width: 0.8,
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        '${daySessions.length}',
+                        style: const TextStyle(
+                          color: sageGreen,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.bold,
+                          height: 1.0,
+                        ),
+                      ),
                     ),
-                    child: Text(
-                      s['title'] as String,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10, color: sageGreen),
-                    ),
-                  ),
-                if (daySessions.length > 2)
-                  Text(
-                    '+${daySessions.length - 2} more',
-                    style: const TextStyle(
-                        fontSize: 9, color: muted, fontWeight: FontWeight.bold),
                   ),
               ],
             ),
@@ -987,21 +994,28 @@ class _ScheduleViewState extends State<ScheduleView> {
       }),
     );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        headerRow,
-        const SizedBox(height: 8),
-        GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 7,
-          childAspectRatio: 1.1,
-          mainAxisSpacing: 6,
-          crossAxisSpacing: 6,
-          children: gridCells,
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 600;
+        final cellAspectRatio = isMobile ? 0.82 : 1.15;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            headerRow,
+            const SizedBox(height: 8),
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 7,
+              childAspectRatio: cellAspectRatio,
+              mainAxisSpacing: 6,
+              crossAxisSpacing: 6,
+              children: gridCells,
+            ),
+          ],
+        );
+      },
     );
   }
 

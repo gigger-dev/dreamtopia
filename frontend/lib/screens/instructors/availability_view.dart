@@ -115,7 +115,7 @@ class AvailabilityView extends StatelessWidget {
                           'New admin-approved assignments are accepted immediately. Existing invitations still need your response.',
                           style: TextStyle(
                             fontSize: 13,
-                            color: muted,
+                            color: Colors.red,
                             height: 1.4,
                           ),
                         ),
@@ -208,7 +208,7 @@ class AvailabilityView extends StatelessWidget {
                                   icon: const Icon(
                                     Icons.delete_outline,
                                     size: 20,
-                                    color: muted,
+                                    color: Colors.red,
                                   ),
                                   tooltip: 'Remove block',
                                 ),
