@@ -1184,61 +1184,52 @@ class _AdminChatViewState extends State<AdminChatView>
           borderRadius: BorderRadius.circular(3),
           border: Border.all(color: Colors.amber.shade400, width: 1.2),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.amber.shade100,
-                borderRadius: BorderRadius.circular(3),
-              ),
-              child: Icon(Icons.vpn_key_rounded, size: 20, color: Colors.amber.shade900),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        'Instructor $insName requested permission to re-open chat',
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 450;
+            final textContent = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    Text(
+                      'Instructor $insName requested permission to re-open chat',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.amber.shade900,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade800,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                      child: const Text(
+                        'ACTION REQUIRED',
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 9,
                           fontWeight: FontWeight.bold,
-                          color: Colors.amber.shade900,
+                          color: Colors.white,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.shade800,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                        child: const Text(
-                          'ACTION REQUIRED',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Reason: "$reason"${reqTime.isNotEmpty ? " • Requested: $reqTime" : ""}',
-                    style: TextStyle(fontSize: 11.5, color: Colors.brown.shade800),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            FilledButton.icon(
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Reason: "$reason"${reqTime.isNotEmpty ? " • Requested: $reqTime" : ""}',
+                  style: TextStyle(fontSize: 11.5, color: Colors.brown.shade800),
+                ),
+              ],
+            );
+
+            final button = FilledButton.icon(
               onPressed: showGrantPermissionDialog,
               style: FilledButton.styleFrom(
                 backgroundColor: Colors.amber.shade900,
@@ -1247,8 +1238,51 @@ class _AdminChatViewState extends State<AdminChatView>
               ),
               icon: const Icon(Icons.fact_check_outlined, size: 15),
               label: const Text('Review & Grant', style: TextStyle(fontSize: 12)),
-            ),
-          ],
+            );
+
+            if (isNarrow) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade100,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        child: Icon(Icons.vpn_key_rounded, size: 20, color: Colors.amber.shade900),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(child: textContent),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  button,
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade100,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Icon(Icons.vpn_key_rounded, size: 20, color: Colors.amber.shade900),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: textContent),
+                const SizedBox(width: 12),
+                button,
+              ],
+            );
+          },
         ),
       );
     }
