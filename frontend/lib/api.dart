@@ -116,4 +116,13 @@ class Api {
     }
     return r.bodyBytes;
   }
+
+  Future<dynamic> uploadGeneric(String path, Uint8List bytes, String filename) async {
+    final request = http.MultipartRequest('POST', Uri.parse('$base/$path'));
+    if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final response = await http.Response.fromStream(
+        await request.send().timeout(const Duration(seconds: 40)));
+    return _decode(response);
+  }
 }

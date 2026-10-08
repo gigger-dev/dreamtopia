@@ -20,6 +20,8 @@ import 'practice/practice_view.dart';
 import 'promotions/promotions_view.dart';
 import 'requests/requests_view.dart';
 import 'schedule/schedule_view.dart';
+import 'chat/chat_widget.dart';
+import 'chat/admin_chat_view.dart';
 
 const sessionTypes = {
   'POLE_CLASS': 'Pole classes',
@@ -436,7 +438,8 @@ class _StudioScreenState extends State<StudioScreen> {
         if (admin) ...[
           ('Instructors', Icons.people_outline),
           ('Members', Icons.groups_outlined),
-          ('Promotions', Icons.local_offer_outlined)
+          ('Promotions', Icons.local_offer_outlined),
+          ('Customer Chats', Icons.chat_outlined),
         ],
         if (teacher) ('Availability', Icons.event_busy_outlined),
         if (!teacher) ('Requests', Icons.schedule_outlined),
@@ -460,7 +463,8 @@ class _StudioScreenState extends State<StudioScreen> {
                     ])));
     }
     final wide = MediaQuery.sizeOf(context).width >= 1050;
-    return Scaffold(
+    return Stack(children: [
+      Scaffold(
         appBar: wide
             ? null
             : AppBar(
@@ -625,6 +629,11 @@ class _StudioScreenState extends State<StudioScreen> {
                                     onForm: form,
                                     onFormatDate: when,
                                   ),
+                                'Customer Chats' => AdminChatView(
+                                    api: api,
+                                    instructors: instructors,
+                                    onShowMessage: message,
+                                  ),
                                 _ => NotificationsView(
                                     notices: notices,
                                     onAction: action,
@@ -632,8 +641,15 @@ class _StudioScreenState extends State<StudioScreen> {
                                   ),
                               },
                             ])))),
-          ]))
-        ]));
+                  ])),
+          ]),
+      ),
+      // Floating Customer Chatbot with Full Backdrop covering the entire screen & topbar
+      ChatWidget(
+        api: api,
+        currentUser: me,
+      ),
+    ]);
   }
 
   Widget sidebar() => Material(

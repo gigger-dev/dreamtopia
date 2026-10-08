@@ -12,6 +12,7 @@ import { PackagesModule } from "./packages/packages.module";
 import { BookingsModule } from "./bookings/bookings.module";
 import { InstructorsModule } from "./instructors/instructors.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { ChatModule } from "./chat/chat.module";
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
     BookingsModule,
     InstructorsModule,
     NotificationsModule,
+    ChatModule,
   ],
   controllers: [AuthController],
   providers: [

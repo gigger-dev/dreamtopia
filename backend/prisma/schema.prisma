@@ -74,6 +74,8 @@ model User {
   ledger       CreditLedger[]
   notifications Notification[]
   requests     TimeslotRequest[]
+  conversations ChatConversation[]
+  assignedChats ChatConversation[] @relation("AssignedAdminChats")
 }
 
 model Instructor {
@@ -88,6 +90,7 @@ model Instructor {
   autoAccept Boolean           @default(false)
   sessions   Session[]
   blocks     UnavailableSlot[]
+  chatConversations ChatConversation[]
 }
 
 model PackageProduct {
@@ -245,4 +248,74 @@ model TimeslotRequest {
   createdAt DateTime    @default(now())
 
   @@index([memberId, status])
+}
+
+enum ChatSenderType {
+  USER
+  BOT
+  AI
+  ADMIN
+  INSTRUCTOR
+}
+
+enum ChatStatus {
+  BOT
+  AI
+  WAITING_ADMIN
+  ADMIN_ACTIVE
+  RESOLVED
+}
+
+model ChatConversation {
+  id              String         @id @default(uuid())
+  userId          String?
+  user            User?          @relation(fields: [userId], references: [id])
+  visitorName     String         @default("Guest Member")
+  visitorEmail    String?
+  status          ChatStatus     @default(BOT)
+  assignedAdminId String?
+  assignedAdmin   User?          @relation("AssignedAdminChats", fields: [assignedAdminId], references: [id])
+  instructorId    String?
+  instructor      Instructor?    @relation(fields: [instructorId], references: [id])
+  primaryTopic    String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  messages        ChatMessage[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([instructorId])
+  @@index([assignedAdminId])
+}
+
+model ChatMessage {
+  id             String           @id @default(uuid())
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderType     ChatSenderType
+  senderId       String?
+  senderName     String
+  content        String
+  faqId          String?
+  faq            FaqQuestion?     @relation(fields: [faqId], references: [id], onDelete: SetNull)
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([senderType])
+}
+
+model FaqQuestion {
+  id        String        @id @default(uuid())
+  category  String        @default("General")
+  question  String
+  answer    String
+  keywords  String        @default("")
+  hitCount  Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+
+  @@index([category])
+  @@index([hitCount])
 }

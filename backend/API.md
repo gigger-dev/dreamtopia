@@ -40,6 +40,20 @@ Dates are ISO 8601 UTC timestamps. Fees and discounts are integer currency units
 | GET `/requests` | Admin / member | All / own preferred timeslots |
 | POST `/requests` | Member | `{type,startsAt,endsAt,note}` |
 | PATCH `/requests/:id` | Admin | `{status: REVIEWED\|DECLINED,response}` |
+| GET `/chat/faq` | Public / Signed in | Categories, FAQ questions, top popular questions |
+| GET `/chat/faq/search?q=...` | Public / Signed in | Search FAQs by keyword or phrase |
+| POST `/chat/conversation/start` | Public / Signed in | Start or resume active chat session |
+| GET `/chat/conversation/:id` | Public / Signed in | Get messages & state for conversation |
+| POST `/chat/conversation/:id/faq-answer` | Public / Signed in | `{faqId}` -> answers Q&A and tracks hitCount |
+| POST `/chat/conversation/:id/ask-ai` | Public / Signed in | `{message}` -> AI assistant (Gemini) response |
+| POST `/chat/conversation/:id/request-admin` | Public / Signed in | Request human admin assistance |
+| POST `/chat/conversation/:id/admin-reply` | Admin | `{content}` -> Admin message sent to customer |
+| POST `/chat/conversation/:id/redirect-instructor` | Admin | `{instructorId, note?}` -> re-direct chat to instructor |
+| POST `/chat/conversation/:id/resolve` | Admin | Mark conversation as resolved |
+| GET `/chat/admin/conversations` | Admin | List all chat history, status filterable |
+| GET `/chat/admin/analytics` | Admin | Analytics of most asked questions, topics & keywords |
+| GET `/chat/admin/faq/export` | Admin | Download current FAQ with interest counts as Excel (.xlsx) |
+| POST `/chat/admin/faq/upload` | Admin | Upload updated Excel (.xlsx) with FAQ questions & answers |
 
 ## Example create session
 

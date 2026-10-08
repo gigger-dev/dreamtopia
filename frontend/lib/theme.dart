@@ -21,6 +21,9 @@ const sageLight = Color(0xFFF0EDE6);
 const sageBorder = Color(0xFFD8CFC0);
 // Text ink — warm dark brown, not harsh black
 const ink = Color(0xFF2A2217);
+const charcoal = Color(0xFF2A2217);
+// Gold accent for highlights and rankings
+const gold = Color(0xFFB8860B);
 // Muted text — earthy grey-brown
 const muted = Color(0xFF6B5F50);
 // Alias kept for backward-compat
