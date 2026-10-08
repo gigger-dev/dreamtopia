@@ -199,7 +199,10 @@ class _ChatWidgetState extends State<ChatWidget>
         'content': query,
       });
       sending = true;
-      conversationStatus = 'AI';
+      if (conversationStatus != 'ADMIN_ACTIVE' &&
+          conversationStatus != 'WAITING_ADMIN') {
+        conversationStatus = 'AI';
+      }
     });
     scrollToBottom();
 
@@ -214,8 +217,13 @@ class _ChatWidgetState extends State<ChatWidget>
       );
       if (mounted) {
         setState(() {
-          messages.add(res);
           sending = false;
+          // Only add response if AI actually replied (res is AI/BOT and not user echo)
+          if (res is Map<String, dynamic> &&
+              res['senderType'] != 'USER' &&
+              res['aiReplyClosed'] != true) {
+            messages.add(res);
+          }
         });
         scrollToBottom();
       }
@@ -451,8 +459,8 @@ class _ChatWidgetState extends State<ChatWidget>
             Expanded(
               child: Text(
                 instructorName != null
-                  ? 'Redirected to Instructor $instructorName'
-                  : 'Live chat active with Studio Admin',
+                  ? 'Redirected to Instructor $instructorName • AI Paused'
+                  : 'Live chat active with Studio Admin • AI Paused',
                 style: const TextStyle(fontSize: 11, color: sageGreen, fontWeight: FontWeight.bold),
               ),
             ),

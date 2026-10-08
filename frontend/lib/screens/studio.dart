@@ -64,9 +64,12 @@ class _StudioScreenState extends State<StudioScreen> {
   int loadVersion = 0;
 
   Api get api => widget.api;
-  bool get admin => me?['role'] == 'ADMIN';
-  bool get teacher => me?['role'] == 'INSTRUCTOR';
-  bool get member => me?['role'] == 'MEMBER';
+  bool get admin => me?['role']?.toString().toUpperCase() == 'ADMIN';
+  bool get teacher =>
+      me?['role']?.toString().toUpperCase() == 'INSTRUCTOR' ||
+      me?['instructor'] != null;
+  bool get member =>
+      me?['role']?.toString().toUpperCase() == 'MEMBER' && !teacher && !admin;
   tz.Location get zone => tz.getLocation(settings['timezone'] as String);
 
   @override
@@ -441,7 +444,10 @@ class _StudioScreenState extends State<StudioScreen> {
           ('Promotions', Icons.local_offer_outlined),
           ('Customer Chats', Icons.chat_outlined),
         ],
-        if (teacher) ('Availability', Icons.event_busy_outlined),
+        if (teacher) ...[
+          ('Customer Chats', Icons.chat_outlined),
+          ('Availability', Icons.event_busy_outlined),
+        ],
         if (!teacher) ('Requests', Icons.schedule_outlined),
         ('Notifications', Icons.notifications_none)
       ];
@@ -633,6 +639,7 @@ class _StudioScreenState extends State<StudioScreen> {
                                     api: api,
                                     instructors: instructors,
                                     onShowMessage: message,
+                                    isInstructor: teacher,
                                   ),
                                 _ => NotificationsView(
                                     notices: notices,

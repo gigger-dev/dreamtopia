@@ -10,12 +10,14 @@ class AdminChatView extends StatefulWidget {
   final Api api;
   final List<dynamic> instructors;
   final void Function(String) onShowMessage;
+  final bool isInstructor;
 
   const AdminChatView({
     super.key,
     required this.api,
-    required this.instructors,
+    this.instructors = const [],
     required this.onShowMessage,
+    this.isInstructor = false,
   });
 
   @override
@@ -24,7 +26,7 @@ class AdminChatView extends StatefulWidget {
 
 class _AdminChatViewState extends State<AdminChatView>
     with SingleTickerProviderStateMixin {
-  late TabController tabController;
+  TabController? tabController;
   bool loading = true;
   bool sending = false;
 
@@ -41,7 +43,9 @@ class _AdminChatViewState extends State<AdminChatView>
   @override
   void initState() {
     super.initState();
-    tabController = TabController(length: 2, vsync: this);
+    if (!widget.isInstructor) {
+      tabController = TabController(length: 2, vsync: this);
+    }
     loadAll();
     // Fast live-polling every 1.5s for real-time WebSocket-like experience
     pollTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
@@ -54,7 +58,7 @@ class _AdminChatViewState extends State<AdminChatView>
   @override
   void dispose() {
     pollTimer?.cancel();
-    tabController.dispose();
+    tabController?.dispose();
     replyController.dispose();
     scrollController.dispose();
     super.dispose();
@@ -62,10 +66,14 @@ class _AdminChatViewState extends State<AdminChatView>
 
   Future<void> loadAll() async {
     setState(() => loading = true);
-    await Future.wait([
-      loadConversations(),
-      loadAnalytics(),
-    ]);
+    if (widget.isInstructor) {
+      await loadConversations();
+    } else {
+      await Future.wait([
+        loadConversations(),
+        loadAnalytics(),
+      ]);
+    }
     if (mounted) setState(() => loading = false);
   }
 
@@ -267,6 +275,236 @@ class _AdminChatViewState extends State<AdminChatView>
     }
   }
 
+  // Hand over conversation to AI (re-opens AI auto-reply)
+  Future<void> handoverToAi() async {
+    if (selectedConv == null) return;
+    try {
+      await widget.api.call(
+        'chat/conversation/${selectedConv!['id']}/handover-ai',
+        method: 'POST',
+      );
+      await selectConversation(selectedConv!['id']);
+      await loadConversations();
+      widget.onShowMessage('Conversation returned to AI. AI auto-reply is now active!');
+    } catch (e) {
+      widget.onShowMessage('Error handing over: $e');
+    }
+  }
+
+  // Instructor requests permission from Admin to re-open chat with customer
+  Future<void> showRequestPermissionDialog() async {
+    if (selectedConv == null) return;
+    final reasonController = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        title: Row(
+          children: const [
+            Icon(Icons.vpn_key_outlined, color: sageGreen, size: 22),
+            SizedBox(width: 8),
+            Text('Request Permission from Admin', style: TextStyle(fontSize: 16)),
+          ],
+        ),
+        content: SizedBox(
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This inquiry with ${selectedConv!['visitorName'] ?? 'Member'} was previously resolved. To send messages to this customer again, please submit a permission request to the admin.',
+                style: const TextStyle(fontSize: 13, color: muted),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: reasonController,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  labelText: 'Reason for follow-up (optional)',
+                  hintText: 'e.g. Customer inquired about upcoming choreography sessions...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(3),
+                    borderSide: const BorderSide(color: sageBorder),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.send, size: 15),
+            label: const Text('Submit Request'),
+            style: FilledButton.styleFrom(
+              backgroundColor: sageGreen,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await widget.api.call(
+                  'chat/conversation/${selectedConv!['id']}/request-reopen-permission',
+                  method: 'POST',
+                  body: {
+                    'reason': reasonController.text.trim().isEmpty
+                        ? 'Follow-up customer inquiry'
+                        : reasonController.text.trim(),
+                  },
+                );
+                await selectConversation(selectedConv!['id']);
+                await loadConversations();
+                widget.onShowMessage('Permission request submitted to Admin!');
+              } catch (e) {
+                widget.onShowMessage('Failed to request permission: $e');
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Admin reviews instructor's request and decides on time-gap history sharing
+  Future<void> showGrantPermissionDialog() async {
+    if (selectedConv == null) return;
+    bool shareGapHistory = true;
+
+    final instructorName = selectedConv!['instructor']?['name'] ?? 'Instructor';
+    final customerName = selectedConv!['visitorName'] ?? 'Customer';
+    final reason = selectedConv!['instructorPermissionReason'] ?? 'Follow-up inquiry';
+    final resolvedAt = _formatDateTime(selectedConv!['resolvedAt']);
+    final requestedAt = _formatDateTime(selectedConv!['instructorPermissionRequestedAt']);
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          title: Row(
+            children: [
+              Icon(Icons.verified_user_outlined, color: Colors.amber.shade900, size: 22),
+              const SizedBox(width: 8),
+              const Text('Grant Chat Permission', style: TextStyle(fontSize: 16)),
+            ],
+          ),
+          content: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Instructor $instructorName is requesting permission to resume chatting with $customerName.',
+                  style: const TextStyle(fontSize: 13, color: charcoal),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(color: sageBorder),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Reason: "$reason"', style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+                      const SizedBox(height: 4),
+                      if (resolvedAt.isNotEmpty)
+                        Text('Resolved on: $resolvedAt', style: const TextStyle(fontSize: 11, color: muted)),
+                      if (requestedAt.isNotEmpty)
+                        Text('Permission requested: $requestedAt', style: const TextStyle(fontSize: 11, color: muted)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(color: Colors.amber.shade200),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.access_time_rounded, size: 18, color: Colors.amber.shade900),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Time Gap Privacy: Admin or customer may have exchanged messages between the time the instructor resolved the chat and now. Decide whether to share those messages with the instructor:',
+                          style: TextStyle(fontSize: 12, color: Colors.amber.shade900, height: 1.3),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                RadioListTile<bool>(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: sageGreen,
+                  value: true,
+                  groupValue: shareGapHistory,
+                  title: const Text('Share time-gap messages with instructor', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Instructor can view all messages exchanged with customer during the time gap.', style: TextStyle(fontSize: 11, color: muted)),
+                  onChanged: (val) => setDlgState(() => shareGapHistory = val ?? true),
+                ),
+                RadioListTile<bool>(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  activeColor: sageGreen,
+                  value: false,
+                  groupValue: shareGapHistory,
+                  title: const Text('Hide time-gap messages from instructor', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Messages exchanged during the gap remain private between Admin & Customer only.', style: TextStyle(fontSize: 11, color: muted)),
+                  onChanged: (val) => setDlgState(() => shareGapHistory = val ?? false),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              icon: const Icon(Icons.check_circle_outline, size: 16),
+              label: const Text('Grant Permission'),
+              style: FilledButton.styleFrom(
+                backgroundColor: sageGreen,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
+              ),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                try {
+                  await widget.api.call(
+                    'chat/conversation/${selectedConv!['id']}/grant-reopen-permission',
+                    method: 'POST',
+                    body: {'shareGapHistory': shareGapHistory},
+                  );
+                  await selectConversation(selectedConv!['id']);
+                  await loadConversations();
+                  widget.onShowMessage('Permission granted! Instructor can now message customer.');
+                } catch (e) {
+                  widget.onShowMessage('Failed to grant permission: $e');
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // Upload FAQ Excel (.xlsx)
   Future<void> uploadFaqExcel() async {
     try {
@@ -316,51 +554,64 @@ class _AdminChatViewState extends State<AdminChatView>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Customer Chat Management & Analytics',
+                  widget.isInstructor
+                      ? 'Assigned Customer Chats'
+                      : 'Customer Chat Management & Analytics',
                   style: GoogleFonts.cinzel(fontSize: isMobile ? 18 : 22, fontWeight: FontWeight.bold, color: sageGreen),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Direct admin messaging, instructor reassignment, Excel Q&A database, and inquiry metrics.',
+                  widget.isInstructor
+                      ? 'Customer inquiries redirected to you by studio admin.'
+                      : 'Direct admin messaging, instructor reassignment, Excel Q&A database, and inquiry metrics.',
                   style: GoogleFonts.lato(color: muted, fontSize: isMobile ? 11 : 13),
                 ),
               ],
             ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: uploadFaqExcel,
-                  icon: const Icon(Icons.upload_file, size: 16),
-                  label: Text(isMobile ? 'Upload FAQ' : 'Update FAQ from Excel'),
-                ),
-              ],
-            ),
+            if (!widget.isInstructor)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: uploadFaqExcel,
+                    icon: const Icon(Icons.upload_file, size: 16),
+                    label: Text(isMobile ? 'Upload FAQ' : 'Update FAQ from Excel'),
+                  ),
+                ],
+              ),
           ],
         ),
         const SizedBox(height: 18),
-        TabBar(
-          controller: tabController,
-          labelColor: plum,
-          unselectedLabelColor: muted,
-          indicatorColor: plum,
-          isScrollable: isMobile,
-          tabs: const [
-            Tab(icon: Icon(Icons.forum_outlined), text: 'Conversations & Chat History'),
-            Tab(icon: Icon(Icons.analytics_outlined), text: 'Interest & Keyword Analysis'),
-          ],
-        ),
-        const SizedBox(height: 16),
-        SizedBox(
-          height: isMobile ? 680 : 660,
-          child: TabBarView(
-            controller: tabController,
-            children: [
-              _buildConversationsTab(),
-              _buildAnalyticsTab(),
-            ],
+        if (widget.isInstructor)
+          SizedBox(
+            height: isMobile ? 680 : 660,
+            child: _buildConversationsTab(),
+          )
+        else ...[
+          if (tabController != null)
+            TabBar(
+              controller: tabController,
+              labelColor: plum,
+              unselectedLabelColor: muted,
+              indicatorColor: plum,
+              isScrollable: isMobile,
+              tabs: const [
+                Tab(icon: Icon(Icons.forum_outlined), text: 'Conversations & Chat History'),
+                Tab(icon: Icon(Icons.analytics_outlined), text: 'Interest & Keyword Analysis'),
+              ],
+            ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: isMobile ? 680 : 660,
+            child: TabBarView(
+              controller: tabController,
+              children: [
+                _buildConversationsTab(),
+                _buildAnalyticsTab(),
+              ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -385,6 +636,7 @@ class _AdminChatViewState extends State<AdminChatView>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildChatDetailHeader(isMobile: true),
+            _buildPermissionRequestBanner(),
             Expanded(child: _buildChatDetailMessages()),
             _buildChatDetailReplyBox(),
           ],
@@ -401,95 +653,229 @@ class _AdminChatViewState extends State<AdminChatView>
       ),
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(10.0),
-            child: DropdownButtonFormField<String>(
-              value: filterStatus,
-              decoration: InputDecoration(
-                labelText: 'Status Filter',
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(3),
-                  borderSide: const BorderSide(color: sageBorder),
+          if (!widget.isInstructor)
+            Padding(
+              padding: const EdgeInsets.all(10.0),
+              child: DropdownButtonFormField<String>(
+                value: filterStatus,
+                decoration: InputDecoration(
+                  labelText: 'Status Filter',
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(3),
+                    borderSide: const BorderSide(color: sageBorder),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(3),
+                    borderSide: const BorderSide(color: sageBorder),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(3),
+                    borderSide: const BorderSide(color: sageGreen, width: 1.5),
+                  ),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(3),
-                  borderSide: const BorderSide(color: sageBorder),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(3),
-                  borderSide: const BorderSide(color: sageGreen, width: 1.5),
-                ),
+                items: const [
+                  DropdownMenuItem(value: 'ALL', child: Text('All Conversations')),
+                  DropdownMenuItem(value: 'WAITING_ADMIN', child: Text('Waiting for Admin')),
+                  DropdownMenuItem(value: 'ADMIN_ACTIVE', child: Text('Active with Admin')),
+                  DropdownMenuItem(value: 'PERMISSION_REQUESTS', child: Text('⚠️ Permission Requests Pending')),
+                  DropdownMenuItem(value: 'REDIRECTED_INSTRUCTOR', child: Text('Redirected to Instructor')),
+                  DropdownMenuItem(value: 'AI', child: Text('AI / Bot Conversations')),
+                  DropdownMenuItem(value: 'RESOLVED', child: Text('Resolved')),
+                ],
+                onChanged: (val) {
+                  setState(() => filterStatus = val ?? 'ALL');
+                },
               ),
-              items: const [
-                DropdownMenuItem(value: 'ALL', child: Text('All Conversations')),
-                DropdownMenuItem(value: 'WAITING_ADMIN', child: Text('Waiting for Admin')),
-                DropdownMenuItem(value: 'ADMIN_ACTIVE', child: Text('Active with Admin')),
-                DropdownMenuItem(value: 'REDIRECTED_INSTRUCTOR', child: Text('Redirected to Instructor')),
-                DropdownMenuItem(value: 'AI', child: Text('AI / Bot Conversations')),
-                DropdownMenuItem(value: 'RESOLVED', child: Text('Resolved')),
-              ],
-              onChanged: (val) {
-                setState(() => filterStatus = val ?? 'ALL');
-              },
-            ),
-          ),
-          Expanded(
-            child: ListView.separated(
-              itemCount: filteredConversations.length,
-              separatorBuilder: (_, __) => const Divider(height: 1, color: sageBorder),
-              itemBuilder: (context, i) {
-                final c = filteredConversations[i];
-                final isSelected = selectedConv?['id'] == c['id'];
-                final status = c['status']?.toString() ?? 'BOT';
-                final isWaiting = status == 'WAITING_ADMIN';
-                final msgs = (c['messages'] as List?) ?? [];
-                final lastMsg = msgs.isNotEmpty ? msgs.first['content'] : 'No messages';
-
-                return ListTile(
-                  selected: isSelected,
-                  selectedTileColor: sageLight,
-                  leading: CircleAvatar(
-                    backgroundColor: isWaiting ? Colors.amber.shade200 : sageLight,
-                    child: Icon(
-                      isWaiting
-                          ? Icons.priority_high
-                          : status == 'RESOLVED'
-                              ? Icons.check
-                              : Icons.person_outline,
-                      color: isWaiting ? Colors.brown : plum,
-                      size: 18,
+            )
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: const BoxDecoration(
+                color: sageLight,
+                border: Border(bottom: BorderSide(color: sageBorder)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.forum_outlined, size: 16, color: sageGreen),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Assigned Inquiries',
+                    style: GoogleFonts.cinzel(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: charcoal,
                     ),
                   ),
-                  title: Text(
-                    c['visitorName'] ?? 'Guest Member',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                  subtitle: Text(
-                    lastMsg,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11, color: muted),
-                  ),
-                  trailing: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
-                      color: isWaiting ? Colors.red.shade100 : Colors.grey.shade100,
+                      color: Colors.white,
                       borderRadius: BorderRadius.circular(3),
+                      border: Border.all(color: sageBorder),
                     ),
                     child: Text(
-                      status,
-                      style: TextStyle(
-                        fontSize: 9,
+                      '${conversations.length} Active',
+                      style: const TextStyle(
+                        fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        color: isWaiting ? Colors.red.shade800 : Colors.black54,
+                        color: sageGreen,
                       ),
                     ),
                   ),
-                  onTap: () => selectConversation(c['id']),
-                );
-              },
+                ],
+              ),
             ),
+          Expanded(
+            child: filteredConversations.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            widget.isInstructor
+                                ? Icons.mark_chat_read_outlined
+                                : Icons.chat_bubble_outline,
+                            size: 38,
+                            color: muted,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            widget.isInstructor
+                                ? 'No Assigned Chats'
+                                : 'No Conversations Found',
+                            style: GoogleFonts.cinzel(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: charcoal,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            widget.isInstructor
+                                ? 'Customer chats redirected to you by studio admin will appear here in real time.'
+                                : 'Incoming chats will appear here.',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 12, color: muted),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: filteredConversations.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1, color: sageBorder),
+                    itemBuilder: (context, i) {
+                      final c = filteredConversations[i];
+                      final isSelected = selectedConv?['id'] == c['id'];
+                      final status = c['status']?.toString() ?? 'BOT';
+                      final isWaiting = status == 'WAITING_ADMIN';
+                      final msgs = (c['messages'] as List?) ?? [];
+                      final lastMsg = msgs.isNotEmpty ? msgs.first['content'] : 'No messages';
+
+                        final isReqPerm = c['instructorPermissionRequested'] == true;
+                        final isInstructorLocked = widget.isInstructor && (
+                          status == 'RESOLVED' ||
+                          (c['resolvedByRole'] == 'INSTRUCTOR' && c['instructorPermissionGranted'] != true)
+                        );
+
+                        return ListTile(
+                          selected: isSelected,
+                          selectedTileColor: sageLight,
+                          leading: CircleAvatar(
+                            backgroundColor: isReqPerm
+                                ? Colors.amber.shade200
+                                : isWaiting
+                                    ? Colors.amber.shade200
+                                    : sageLight,
+                            child: Icon(
+                              isReqPerm
+                                  ? Icons.vpn_key
+                                  : isWaiting
+                                      ? Icons.priority_high
+                                      : status == 'RESOLVED'
+                                          ? Icons.check
+                                          : Icons.person_outline,
+                              color: isReqPerm
+                                  ? Colors.amber.shade900
+                                  : isWaiting
+                                      ? Colors.brown
+                                      : plum,
+                              size: 18,
+                            ),
+                          ),
+                          title: Text(
+                            c['visitorName'] ?? 'Guest Member',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                          subtitle: Text(
+                            lastMsg,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 11, color: muted),
+                          ),
+                          trailing: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if (isReqPerm) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.shade100,
+                                    borderRadius: BorderRadius.circular(3),
+                                    border: Border.all(color: Colors.amber.shade400, width: 0.8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.vpn_key, size: 9, color: Colors.amber.shade900),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        'REQ PERM',
+                                        style: TextStyle(
+                                          fontSize: 8.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.amber.shade900,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                              ],
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: isWaiting
+                                      ? Colors.red.shade100
+                                      : isInstructorLocked
+                                          ? Colors.grey.shade200
+                                          : Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: Text(
+                                  isInstructorLocked ? 'LOCKED' : status,
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: isWaiting
+                                        ? Colors.red.shade800
+                                        : isInstructorLocked
+                                            ? Colors.brown.shade700
+                                            : Colors.black54,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          onTap: () => selectConversation(c['id']),
+                        );
+                    },
+                  ),
           ),
         ],
       ),
@@ -509,7 +895,9 @@ class _AdminChatViewState extends State<AdminChatView>
             child: selectedConv == null
                 ? Center(
                     child: Text(
-                      'Select a customer conversation on the left to view history and reply.',
+                      widget.isInstructor
+                          ? 'Select an assigned customer conversation on the left to view history and reply.'
+                          : 'Select a customer conversation on the left to view history and reply.',
                       style: GoogleFonts.lato(color: muted),
                     ),
                   )
@@ -525,6 +913,7 @@ class _AdminChatViewState extends State<AdminChatView>
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         _buildChatDetailHeader(isMobile: false),
+                        _buildPermissionRequestBanner(),
                         Expanded(child: _buildChatDetailMessages()),
                         _buildChatDetailReplyBox(),
                       ],
@@ -540,7 +929,11 @@ class _AdminChatViewState extends State<AdminChatView>
   }
 
   List<dynamic> get filteredConversations {
+    if (widget.isInstructor) return conversations;
     if (filterStatus == 'ALL') return conversations;
+    if (filterStatus == 'PERMISSION_REQUESTS') {
+      return conversations.where((c) => c['instructorPermissionRequested'] == true).toList();
+    }
     if (filterStatus == 'REDIRECTED_INSTRUCTOR') {
       return conversations.where((c) => c['instructorId'] != null || c['instructor'] != null).toList();
     }
@@ -643,7 +1036,13 @@ class _AdminChatViewState extends State<AdminChatView>
                             ),
                           ),
                           child: Text(
-                            status,
+                            status == 'ADMIN_ACTIVE'
+                                ? 'ACTIVE (AI PAUSED)'
+                                : status == 'WAITING_ADMIN'
+                                    ? 'WAITING STAFF'
+                                    : status == 'RESOLVED'
+                                        ? 'RESOLVED'
+                                        : 'AI ACTIVE',
                             style: TextStyle(
                               fontSize: 9.5,
                               fontWeight: FontWeight.bold,
@@ -659,7 +1058,9 @@ class _AdminChatViewState extends State<AdminChatView>
                           const SizedBox(width: 6),
                           Flexible(
                             child: Text(
-                              'Assigned: ${instructor['name']}',
+                              widget.isInstructor
+                                  ? 'Assigned to you'
+                                  : 'Assigned: ${instructor['name']}',
                               style: const TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w600,
@@ -676,61 +1077,87 @@ class _AdminChatViewState extends State<AdminChatView>
               ),
               if (!isMobile) ...[
                 const SizedBox(width: 12),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: showRedirectInstructorDialog,
-                      icon: const Icon(Icons.person_pin, size: 15),
-                      style: OutlinedButton.styleFrom(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                Flexible(
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      if (!widget.isInstructor)
+                        OutlinedButton.icon(
+                          onPressed: showRedirectInstructorDialog,
+                          icon: const Icon(Icons.person_pin, size: 14),
+                          style: OutlinedButton.styleFrom(
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          ),
+                          label: Text(
+                            isNarrow ? 'Re-direct' : 'Re-direct to Instructor',
+                            style: const TextStyle(fontSize: 11.5),
+                          ),
+                        ),
+                      if (status == 'ADMIN_ACTIVE')
+                        OutlinedButton.icon(
+                          onPressed: handoverToAi,
+                          icon: const Icon(Icons.smart_toy_outlined, size: 14),
+                          style: OutlinedButton.styleFrom(
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          ),
+                          label: Text(
+                            isNarrow ? 'To AI' : 'Handover to AI',
+                            style: const TextStyle(fontSize: 11.5),
+                          ),
+                        ),
+                      FilledButton.tonal(
+                        onPressed: status == 'RESOLVED' ? null : resolveConversation,
+                        style: FilledButton.styleFrom(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                        child: const Text('Resolve', style: TextStyle(fontSize: 11.5)),
                       ),
-                      label: Text(
-                        isNarrow ? 'Re-direct' : 'Re-direct to Instructor',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton.tonal(
-                      onPressed: status == 'RESOLVED' ? null : resolveConversation,
-                      style: FilledButton.styleFrom(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      ),
-                      child: const Text('Resolve', style: TextStyle(fontSize: 12)),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ],
           ),
-          // On mobile, show action buttons below user info in a clean row
+          // On mobile or narrow widths, show action buttons below user info in a wrap
           if (isMobile) ...[
-            const SizedBox(height: 8),
-            Row(
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
               children: [
-                Expanded(
-                  child: OutlinedButton.icon(
+                if (!widget.isInstructor)
+                  OutlinedButton.icon(
                     onPressed: showRedirectInstructorDialog,
-                    icon: const Icon(Icons.person_pin, size: 14),
+                    icon: const Icon(Icons.person_pin, size: 13),
                     style: OutlinedButton.styleFrom(
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     ),
                     label: const Text('Re-direct', style: TextStyle(fontSize: 11)),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.tonal(
-                    onPressed: status == 'RESOLVED' ? null : resolveConversation,
-                    style: FilledButton.styleFrom(
+                if (status == 'ADMIN_ACTIVE')
+                  OutlinedButton.icon(
+                    onPressed: handoverToAi,
+                    icon: const Icon(Icons.smart_toy_outlined, size: 13),
+                    style: OutlinedButton.styleFrom(
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     ),
-                    child: const Text('Resolve', style: TextStyle(fontSize: 11)),
+                    label: const Text('To AI', style: TextStyle(fontSize: 11)),
                   ),
+                FilledButton.tonal(
+                  onPressed: status == 'RESOLVED' ? null : resolveConversation,
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  child: const Text('Resolve', style: TextStyle(fontSize: 11)),
                 ),
               ],
             ),
@@ -738,6 +1165,120 @@ class _AdminChatViewState extends State<AdminChatView>
         ],
       ),
     );
+  }
+
+  Widget _buildPermissionRequestBanner() {
+    if (selectedConv == null) return const SizedBox.shrink();
+
+    // 1. Admin view: Instructor requested permission
+    if (!widget.isInstructor && selectedConv!['instructorPermissionRequested'] == true) {
+      final insName = selectedConv!['instructor']?['name'] ?? 'Instructor';
+      final reason = selectedConv!['instructorPermissionReason'] ?? 'Follow-up inquiry';
+      final reqTime = _formatDateTime(selectedConv!['instructorPermissionRequestedAt']);
+
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.amber.shade50,
+          borderRadius: BorderRadius.circular(3),
+          border: Border.all(color: Colors.amber.shade400, width: 1.2),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade100,
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: Icon(Icons.vpn_key_rounded, size: 20, color: Colors.amber.shade900),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Instructor $insName requested permission to re-open chat',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.amber.shade900,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade800,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                        child: const Text(
+                          'ACTION REQUIRED',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Reason: "$reason"${reqTime.isNotEmpty ? " • Requested: $reqTime" : ""}',
+                    style: TextStyle(fontSize: 11.5, color: Colors.brown.shade800),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: showGrantPermissionDialog,
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.amber.shade900,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
+              icon: const Icon(Icons.fact_check_outlined, size: 15),
+              label: const Text('Review & Grant', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 2. Instructor view: Time gap privacy note if gap messages are hidden
+    if (widget.isInstructor && selectedConv!['hideGapMessagesFromInstructor'] == true) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(3),
+          border: Border.all(color: sageBorder),
+        ),
+        child: Row(
+          children: const [
+            Icon(Icons.privacy_tip_outlined, size: 15, color: muted),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Note: Messages exchanged between admin and customer during resolution gap remain private.',
+                style: TextStyle(fontSize: 11, color: muted),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 
   String _formatDateTime(dynamic raw) {
@@ -837,6 +1378,181 @@ class _AdminChatViewState extends State<AdminChatView>
   }
 
   Widget _buildChatDetailReplyBox() {
+    if (selectedConv == null) return const SizedBox.shrink();
+
+    // Instructor resolve lockout logic
+    if (widget.isInstructor) {
+      final status = selectedConv!['status']?.toString() ?? 'BOT';
+      final isResolved = status == 'RESOLVED';
+      final isInstructorLocked = isResolved ||
+          (selectedConv!['resolvedByRole'] == 'INSTRUCTOR' &&
+              selectedConv!['instructorPermissionGranted'] != true);
+
+      if (isInstructorLocked) {
+        final isReqPending = selectedConv!['instructorPermissionRequested'] == true;
+        final screenWidth = MediaQuery.sizeOf(context).width;
+        final isNarrow = screenWidth < 680;
+
+        if (isReqPending) {
+          final reason = selectedConv!['instructorPermissionReason'] ?? 'Follow-up inquiry';
+          final reqTime = _formatDateTime(selectedConv!['instructorPermissionRequestedAt']);
+
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(3)),
+              border: const Border(top: BorderSide(color: sageBorder)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade100,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Icon(Icons.hourglass_top_rounded, color: Colors.amber.shade900, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              'Permission Request Pending Admin Review',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.amber.shade900,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.shade200,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            child: Text(
+                              'PENDING',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.amber.shade900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Reason: "$reason"${reqTime.isNotEmpty ? " • Submitted: $reqTime" : ""}',
+                        style: TextStyle(fontSize: 11.5, color: Colors.brown.shade800),
+                      ),
+                      const SizedBox(height: 1),
+                      const Text(
+                        'You will be able to message this customer once an admin approves your request.',
+                        style: TextStyle(fontSize: 11, color: muted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        // Not yet requested -> show Resolved lock card + Request button
+        final resolvedTime = _formatDateTime(selectedConv!['resolvedAt']);
+
+        final infoText = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Conversation Resolved by Instructor',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: charcoal,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'This chat was resolved${resolvedTime.isNotEmpty ? " on $resolvedTime" : ""}. You cannot send messages to this customer again without admin approval.',
+              style: const TextStyle(fontSize: 11.5, color: muted),
+            ),
+          ],
+        );
+
+        final reqButton = FilledButton.icon(
+          onPressed: showRequestPermissionDialog,
+          style: FilledButton.styleFrom(
+            backgroundColor: sageGreen,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(3)),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          ),
+          icon: const Icon(Icons.vpn_key_outlined, size: 15),
+          label: const Text('Request Permission from Admin', style: TextStyle(fontSize: 12)),
+        );
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(3)),
+            border: const Border(top: BorderSide(color: sageBorder)),
+          ),
+          child: isNarrow
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Icon(Icons.lock_outline, color: charcoal, size: 18),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(child: infoText),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    reqButton,
+                  ],
+                )
+              : Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Icon(Icons.lock_outline, color: charcoal, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: infoText),
+                    const SizedBox(width: 12),
+                    reqButton,
+                  ],
+                ),
+        );
+      }
+    }
+
+    // Default reply input box (for Admin, or unlocked Instructor)
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: const BoxDecoration(
@@ -850,7 +1566,9 @@ class _AdminChatViewState extends State<AdminChatView>
             child: TextField(
               controller: replyController,
               decoration: InputDecoration(
-                hintText: 'Type your admin reply to this customer…',
+                hintText: widget.isInstructor
+                    ? 'Type your reply to this customer…'
+                    : 'Type your admin reply to this customer…',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(3),
                   borderSide: const BorderSide(color: sageBorder),

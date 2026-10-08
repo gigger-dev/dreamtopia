@@ -16,7 +16,7 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import { ChatService } from "./chat.service";
 import { Roles, Public, AuthRequest, Actor } from "../auth/auth";
 import { Role, ChatStatus } from "@prisma/client";
-import { IsString, IsOptional, IsNotEmpty } from "class-validator";
+import { IsString, IsOptional, IsNotEmpty, IsBoolean } from "class-validator";
 import type { Request, Response } from "express";
 
 class StartConversationDto {
@@ -40,6 +40,14 @@ class AdminReplyDto {
 class RedirectInstructorDto {
   @IsNotEmpty() @IsString() instructorId!: string;
   @IsOptional() @IsString() note?: string;
+}
+
+class RequestReopenPermissionDto {
+  @IsOptional() @IsString() reason?: string;
+}
+
+class GrantReopenPermissionDto {
+  @IsNotEmpty() @IsBoolean() shareGapHistory!: boolean;
 }
 
 @Controller("chat")
@@ -91,8 +99,20 @@ export class ChatController {
 
   @Public()
   @Get("conversation/:id")
-  async getConversation(@Param("id") id: string) {
-    return this.chatService.getConversationById(id);
+  async getConversation(
+    @Param("id") id: string,
+    @Req() req: Request & { user?: Actor },
+  ) {
+    let actor = req.user;
+    if (!actor && req.headers?.authorization) {
+      try {
+        const token = req.headers.authorization.match(/^Bearer (.+)$/)?.[1];
+        if (token) {
+          actor = this.jwt.verify<Actor>(token);
+        }
+      } catch (_) {}
+    }
+    return this.chatService.getConversationById(id, actor);
   }
 
   @Public()
@@ -128,8 +148,8 @@ export class ChatController {
     return this.chatService.requestAdminAssistance(conversationId, note);
   }
 
-  // Admin reply directly to customer
-  @Roles(Role.ADMIN)
+  // Staff reply directly to customer (Admin or Assigned Instructor)
+  @Roles(Role.ADMIN, Role.INSTRUCTOR)
   @Post("conversation/:id/admin-reply")
   async adminReply(
     @Param("id") conversationId: string,
@@ -138,8 +158,7 @@ export class ChatController {
   ) {
     return this.chatService.sendAdminMessage(
       conversationId,
-      req.user.id,
-      req.user.name,
+      req.user,
       dto.content,
     );
   }
@@ -158,18 +177,64 @@ export class ChatController {
     );
   }
 
-  // Resolve chat
-  @Roles(Role.ADMIN)
+  // Resolve chat (Admin or Assigned Instructor)
+  @Roles(Role.ADMIN, Role.INSTRUCTOR)
   @Post("conversation/:id/resolve")
-  async resolveChat(@Param("id") conversationId: string) {
-    return this.chatService.resolveConversation(conversationId);
+  async resolveChat(
+    @Param("id") conversationId: string,
+    @Req() req: AuthRequest,
+  ) {
+    return this.chatService.resolveConversation(conversationId, req.user);
   }
 
-  // Admin view all chat history
+  // Staff handover chat back to AI (opens AI auto reply)
+  @Roles(Role.ADMIN, Role.INSTRUCTOR)
+  @Post("conversation/:id/handover-ai")
+  async handoverToAi(
+    @Param("id") conversationId: string,
+    @Req() req: AuthRequest,
+  ) {
+    return this.chatService.handoverToAi(conversationId, req.user);
+  }
+
+  // Instructor requests permission from admin to re-open chat
+  @Roles(Role.INSTRUCTOR)
+  @Post("conversation/:id/request-reopen-permission")
+  async requestReopenPermission(
+    @Param("id") conversationId: string,
+    @Req() req: AuthRequest,
+    @Body() dto: RequestReopenPermissionDto,
+  ) {
+    return this.chatService.requestReopenPermission(
+      conversationId,
+      req.user,
+      dto.reason,
+    );
+  }
+
+  // Admin grants reopen permission and decides whether to share time gap history
   @Roles(Role.ADMIN)
+  @Post("conversation/:id/grant-reopen-permission")
+  async grantReopenPermission(
+    @Param("id") conversationId: string,
+    @Req() req: AuthRequest,
+    @Body() dto: GrantReopenPermissionDto,
+  ) {
+    return this.chatService.grantReopenPermission(
+      conversationId,
+      req.user,
+      dto.shareGapHistory,
+    );
+  }
+
+  // Admin and Instructor view chat history (Instructors see only redirected chats)
+  @Roles(Role.ADMIN, Role.INSTRUCTOR)
   @Get("admin/conversations")
-  async listAdminConversations(@Query("status") status?: ChatStatus) {
-    return this.chatService.listConversations(status);
+  async listAdminConversations(
+    @Req() req: AuthRequest,
+    @Query("status") status?: ChatStatus,
+  ) {
+    return this.chatService.listConversations(req.user, status);
   }
 
   // Analytics for interest counts and question analysis

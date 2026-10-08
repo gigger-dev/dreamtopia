@@ -3,6 +3,7 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma.service";
 import ExcelJS from "exceljs";
@@ -11,7 +12,8 @@ import * as fs from "fs";
 import { Readable } from "stream";
 import { generateDefaultFaqExcel } from "./faq-excel.generator";
 import { GoogleGenAI, type Content } from "@google/genai";
-import { ChatSenderType, ChatStatus } from "@prisma/client";
+import { ChatSenderType, ChatStatus, Role } from "@prisma/client";
+import { Actor } from "../auth/auth";
 
 @Injectable()
 export class ChatService {
@@ -187,7 +189,7 @@ export class ChatService {
     });
   }
 
-  async getConversationById(id: string) {
+  async getConversationById(id: string, actor?: Actor) {
     const conv = await this.db.chatConversation.findUnique({
       where: { id },
       include: {
@@ -201,6 +203,36 @@ export class ChatService {
       },
     });
     if (!conv) throw new NotFoundException("Conversation not found");
+
+    if (actor && actor.role === Role.INSTRUCTOR) {
+      const instructor = await this.db.instructor.findFirst({
+        where: {
+          OR: [{ userId: actor.id }, { email: actor.email.toLowerCase() }],
+        },
+      });
+      if (!instructor || conv.instructorId !== instructor.id) {
+        throw new ForbiddenException(
+          "You can only view conversations redirected to you.",
+        );
+      }
+
+      // If Admin chose NOT to share time gap chat history, hide gap messages
+      if (
+        conv.hideGapMessagesFromInstructor &&
+        conv.gapStartTime &&
+        conv.gapEndTime
+      ) {
+        const gapStart = new Date(conv.gapStartTime).getTime();
+        const gapEnd = new Date(conv.gapEndTime).getTime();
+
+        conv.messages = conv.messages.filter((m) => {
+          if (m.senderType === "BOT") return true;
+          const mTime = new Date(m.createdAt).getTime();
+          return mTime < gapStart || mTime > gapEnd;
+        });
+      }
+    }
+
     return conv;
   }
 
@@ -284,8 +316,16 @@ export class ChatService {
   // --- FLOW 2: AI CHATBOT (GEMINI) ---
 
   async askAi(conversationId: string, userMessage: string, senderName = "Customer") {
+    const conv = await this.db.chatConversation.findUnique({
+      where: { id: conversationId },
+      include: { instructor: true, assignedAdmin: true },
+    });
+    if (!conv) {
+      throw new NotFoundException("Conversation not found");
+    }
+
     // 1. Record customer's message
-    await this.db.chatMessage.create({
+    const userMsg = await this.db.chatMessage.create({
       data: {
         conversationId,
         senderType: ChatSenderType.USER,
@@ -294,11 +334,63 @@ export class ChatService {
       },
     });
 
-    // Switch conversation status to AI if it was in BOT mode
-    await this.db.chatConversation.update({
-      where: { id: conversationId },
-      data: { status: ChatStatus.AI },
-    });
+    // 2. CHECK IF ADMIN OR INSTRUCTOR IS CURRENTLY ACTIVE IN CHAT
+    const isStaffActive =
+      conv.status === ChatStatus.ADMIN_ACTIVE ||
+      conv.status === ChatStatus.WAITING_ADMIN;
+
+    if (isStaffActive) {
+      // AI AUTO REPLY IS CLOSED: Staff (admin or instructor) is actively handling the chat.
+      await this.db.chatConversation.update({
+        where: { id: conversationId },
+        data: { updatedAt: new Date() },
+      });
+
+      // Send push notification to assigned instructor or admin
+      const recipientUserId =
+        conv.instructor?.userId || conv.assignedAdminId;
+      if (recipientUserId) {
+        await this.db.notification.create({
+          data: {
+            userId: recipientUserId,
+            title: `New message from ${conv.visitorName}`,
+            body:
+              userMessage.length > 60
+                ? `${userMessage.substring(0, 60)}…`
+                : userMessage,
+          },
+        });
+      } else if (conv.status === ChatStatus.WAITING_ADMIN) {
+        const admins = await this.db.user.findMany({ where: { role: Role.ADMIN } });
+        for (const adm of admins) {
+          await this.db.notification.create({
+            data: {
+              userId: adm.id,
+              title: `New message from ${conv.visitorName}`,
+              body:
+                userMessage.length > 60
+                  ? `${userMessage.substring(0, 60)}…`
+                  : userMessage,
+            },
+          });
+        }
+      }
+
+      // Return user message; NO AI auto-reply is generated
+      return {
+        ...userMsg,
+        aiReplyClosed: true,
+        staffActive: true,
+      };
+    }
+
+    // 3. ADMIN OR INSTRUCTOR IS INACTIVE (status is BOT, AI, or RESOLVED) -> OPEN AI AUTO REPLY!
+    if (conv.status === ChatStatus.RESOLVED || conv.status === ChatStatus.BOT) {
+      await this.db.chatConversation.update({
+        where: { id: conversationId },
+        data: { status: ChatStatus.AI },
+      });
+    }
 
     // Fetch conversation context for AI
     const history = await this.db.chatMessage.findMany({
@@ -422,24 +514,66 @@ Instructions:
 
   async sendAdminMessage(
     conversationId: string,
-    adminId: string,
-    adminName: string,
+    actor: Actor,
     content: string,
   ) {
+    let senderType: ChatSenderType = ChatSenderType.ADMIN;
+    let senderName = `${actor.name} (Admin)`;
+    let notificationTitle = "Message from Studio Admin";
+
+    if (actor.role === Role.INSTRUCTOR) {
+      const instructor = await this.db.instructor.findFirst({
+        where: {
+          OR: [{ userId: actor.id }, { email: actor.email.toLowerCase() }],
+        },
+      });
+      if (!instructor) {
+        throw new ForbiddenException(
+          "No instructor profile linked to your account.",
+        );
+      }
+
+      const conv = await this.db.chatConversation.findUnique({
+        where: { id: conversationId },
+      });
+      if (!conv) {
+        throw new NotFoundException("Conversation not found");
+      }
+      if (conv.instructorId !== instructor.id) {
+        throw new ForbiddenException(
+          "You can only reply to chats assigned to you.",
+        );
+      }
+
+      // If conversation is resolved or was resolved by instructor without admin permission, block reply
+      if (
+        conv.status === ChatStatus.RESOLVED ||
+        (conv.resolvedByRole === "INSTRUCTOR" && !conv.instructorPermissionGranted)
+      ) {
+        throw new ForbiddenException(
+          "This conversation was marked resolved. You cannot send messages to this customer again without admin permission.",
+        );
+      }
+
+      senderType = ChatSenderType.INSTRUCTOR;
+      senderName = `${actor.name} (Instructor)`;
+      notificationTitle = `Message from Instructor ${actor.name}`;
+    }
+
     await this.db.chatConversation.update({
       where: { id: conversationId },
       data: {
-        assignedAdminId: adminId,
         status: ChatStatus.ADMIN_ACTIVE,
+        ...(actor.role === Role.ADMIN ? { assignedAdminId: actor.id } : {}),
       },
     });
 
     const msg = await this.db.chatMessage.create({
       data: {
         conversationId,
-        senderType: ChatSenderType.ADMIN,
-        senderId: adminId,
-        senderName: `${adminName} (Admin)`,
+        senderType,
+        senderId: actor.id,
+        senderName,
         content,
       },
     });
@@ -452,7 +586,7 @@ Instructions:
       await this.db.notification.create({
         data: {
           userId: conv.userId,
-          title: "Message from Studio Admin",
+          title: notificationTitle,
           body: content.length > 60 ? `${content.substring(0, 60)}…` : content,
         },
       });
@@ -477,12 +611,23 @@ Instructions:
       data: {
         instructorId,
         status: ChatStatus.ADMIN_ACTIVE,
+        instructorPermissionRequested: false,
+        instructorPermissionGranted: true,
       },
     });
 
-    const noticeText = note
-      ? `This conversation has been redirected to instructor ${instructor.name}. Note: ${note}`
-      : `This conversation has been redirected to instructor ${instructor.name} (${instructor.specialty}).`;
+    const contactParts: string[] = [];
+    contactParts.push(`Email: ${instructor.email}`);
+    if (instructor.phone) {
+      contactParts.push(`Phone: ${instructor.phone}`);
+    }
+    const contactStr =
+      contactParts.length > 0
+        ? `\nInstructor Contact:\n• ${contactParts.join("\n• ")}`
+        : "";
+    const noteStr = note ? `\n\nAdmin Note: ${note}` : "";
+
+    const noticeText = `This conversation has been redirected to instructor ${instructor.name} (${instructor.specialty}).${contactStr}${noteStr}`;
 
     await this.db.chatMessage.create({
       data: {
@@ -490,6 +635,10 @@ Instructions:
         senderType: ChatSenderType.BOT,
         senderName: "System",
         content: noticeText,
+        metadata: {
+          instructorEmail: instructor.email,
+          instructorPhone: instructor.phone,
+        },
       },
     });
 
@@ -506,16 +655,246 @@ Instructions:
     return conv;
   }
 
-  async resolveConversation(conversationId: string) {
-    return this.db.chatConversation.update({
+  async resolveConversation(conversationId: string, actor?: Actor) {
+    let resolvedByRole = "ADMIN";
+    if (actor && actor.role === Role.INSTRUCTOR) {
+      const instructor = await this.db.instructor.findFirst({
+        where: {
+          OR: [{ userId: actor.id }, { email: actor.email.toLowerCase() }],
+        },
+      });
+      if (!instructor) {
+        throw new ForbiddenException(
+          "No instructor profile linked to your account.",
+        );
+      }
+
+      const conv = await this.db.chatConversation.findUnique({
+        where: { id: conversationId },
+      });
+      if (!conv) {
+        throw new NotFoundException("Conversation not found");
+      }
+      if (conv.instructorId !== instructor.id) {
+        throw new ForbiddenException(
+          "You can only resolve chats assigned to you.",
+        );
+      }
+      resolvedByRole = "INSTRUCTOR";
+    }
+
+    const updated = await this.db.chatConversation.update({
       where: { id: conversationId },
-      data: { status: ChatStatus.RESOLVED },
+      data: {
+        status: ChatStatus.RESOLVED,
+        resolvedAt: new Date(),
+        resolvedByRole,
+        instructorPermissionRequested: false,
+        instructorPermissionGranted: false,
+      },
     });
+
+    await this.db.chatMessage.create({
+      data: {
+        conversationId,
+        senderType: ChatSenderType.BOT,
+        senderName: "System",
+        content: `Conversation marked as resolved by ${actor?.name || "Staff"} (${resolvedByRole === "INSTRUCTOR" ? "Instructor" : "Admin"}).`,
+      },
+    });
+
+    return updated;
   }
 
-  // --- ADMIN VIEW: CHAT HISTORY & OVERVIEW ---
+  async requestReopenPermission(
+    conversationId: string,
+    actor: Actor,
+    reason?: string,
+  ) {
+    const instructor = await this.db.instructor.findFirst({
+      where: {
+        OR: [{ userId: actor.id }, { email: actor.email.toLowerCase() }],
+      },
+    });
+    if (!instructor) {
+      throw new ForbiddenException("Instructor profile not found.");
+    }
 
-  async listConversations(status?: ChatStatus) {
+    const conv = await this.db.chatConversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (!conv) {
+      throw new NotFoundException("Conversation not found");
+    }
+    if (conv.instructorId !== instructor.id) {
+      throw new ForbiddenException(
+        "You can only request permission for chats assigned to you.",
+      );
+    }
+
+    const updated = await this.db.chatConversation.update({
+      where: { id: conversationId },
+      data: {
+        instructorPermissionRequested: true,
+        instructorPermissionReason: reason || "Follow-up customer inquiry",
+        instructorPermissionRequestedAt: new Date(),
+      },
+    });
+
+    // Notify all admins about the request
+    const admins = await this.db.user.findMany({ where: { role: Role.ADMIN } });
+    for (const adm of admins) {
+      await this.db.notification.create({
+        data: {
+          userId: adm.id,
+          title: `Re-open Chat Request: ${instructor.name}`,
+          body: `${instructor.name} requested permission to re-open chat with ${conv.visitorName}. Reason: ${reason || "Follow-up"}`,
+        },
+      });
+    }
+
+    await this.db.chatMessage.create({
+      data: {
+        conversationId,
+        senderType: ChatSenderType.BOT,
+        senderName: "System",
+        content: `Instructor ${instructor.name} requested permission from admin to re-open chat. (${reason || "Follow-up"})`,
+      },
+    });
+
+    return updated;
+  }
+
+  async grantReopenPermission(
+    conversationId: string,
+    adminActor: Actor,
+    shareGapHistory = true,
+  ) {
+    const conv = await this.db.chatConversation.findUnique({
+      where: { id: conversationId },
+      include: { instructor: true },
+    });
+    if (!conv) {
+      throw new NotFoundException("Conversation not found");
+    }
+
+    const gapStart =
+      conv.resolvedAt || conv.instructorPermissionRequestedAt || new Date();
+    const gapEnd = new Date();
+
+    const updated = await this.db.chatConversation.update({
+      where: { id: conversationId },
+      data: {
+        status: ChatStatus.ADMIN_ACTIVE,
+        instructorPermissionRequested: false,
+        instructorPermissionGranted: true,
+        gapStartTime: gapStart,
+        gapEndTime: gapEnd,
+        hideGapMessagesFromInstructor: !shareGapHistory,
+      },
+    });
+
+    const gapHistoryNote = shareGapHistory
+      ? "Full chat history shared with instructor."
+      : "Time gap chat history kept private from instructor.";
+
+    await this.db.chatMessage.create({
+      data: {
+        conversationId,
+        senderType: ChatSenderType.BOT,
+        senderName: "System",
+        content: `Admin (${adminActor.name}) approved permission for Instructor ${conv.instructor?.name || "Instructor"} to resume chat. (${gapHistoryNote})`,
+      },
+    });
+
+    // Notify instructor
+    if (conv.instructor?.userId) {
+      await this.db.notification.create({
+        data: {
+          userId: conv.instructor.userId,
+          title: "Chat Permission Granted by Admin",
+          body: `Admin approved your request to chat with ${conv.visitorName}. You can now send messages!`,
+        },
+      });
+    }
+
+    return updated;
+  }
+
+  async handoverToAi(conversationId: string, actor: Actor) {
+    if (actor.role === Role.INSTRUCTOR) {
+      const instructor = await this.db.instructor.findFirst({
+        where: {
+          OR: [{ userId: actor.id }, { email: actor.email.toLowerCase() }],
+        },
+      });
+      if (!instructor) {
+        throw new ForbiddenException(
+          "No instructor profile linked to your account.",
+        );
+      }
+      const conv = await this.db.chatConversation.findUnique({
+        where: { id: conversationId },
+      });
+      if (!conv) {
+        throw new NotFoundException("Conversation not found");
+      }
+      if (conv.instructorId !== instructor.id) {
+        throw new ForbiddenException(
+          "You can only hand over chats assigned to you.",
+        );
+      }
+    }
+
+    const conv = await this.db.chatConversation.update({
+      where: { id: conversationId },
+      data: {
+        status: ChatStatus.AI,
+      },
+    });
+
+    const staffRole = actor.role === Role.INSTRUCTOR ? "Instructor" : "Admin";
+    await this.db.chatMessage.create({
+      data: {
+        conversationId,
+        senderType: ChatSenderType.BOT,
+        senderName: "System",
+        content: `${actor.name} (${staffRole}) handed conversation back to Dreamtopia AI Assistant. AI auto-reply is now active.`,
+      },
+    });
+
+    return conv;
+  }
+
+  // --- ADMIN & INSTRUCTOR VIEW: CHAT HISTORY ---
+
+  async listConversations(actor: Actor, status?: ChatStatus) {
+    if (actor.role === Role.INSTRUCTOR) {
+      const instructor = await this.db.instructor.findFirst({
+        where: {
+          OR: [{ userId: actor.id }, { email: actor.email.toLowerCase() }],
+        },
+      });
+      if (!instructor) {
+        return [];
+      }
+      return this.db.chatConversation.findMany({
+        where: {
+          instructorId: instructor.id,
+        },
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          assignedAdmin: { select: { id: true, name: true } },
+          instructor: { select: { id: true, name: true, specialty: true } },
+          messages: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+        orderBy: { updatedAt: "desc" },
+      });
+    }
+
     return this.db.chatConversation.findMany({
       where: status ? { status } : undefined,
       include: {
