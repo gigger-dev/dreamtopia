@@ -20,11 +20,22 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Response } from "express";
+import { v2 as cloudinary, UploadApiResponse } from "cloudinary";
+import streamifier from "streamifier";
 import { AuthRequest, Roles } from "../auth/auth";
 import { PrismaService } from "../prisma.service";
 import { StudioService } from "./studio.service";
 import { imageMime } from "./rules";
 import * as D from "./dto";
+
+if (process.env.CLOUDINARY_CLOUD_NAME) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true,
+  });
+}
 
 @Controller()
 export class StudioController {
@@ -112,7 +123,7 @@ export class StudioController {
   @UseInterceptors(
     FileInterceptor("file", {
       storage: memoryStorage(),
-      limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10MB limit
     }),
   )
   async upload(
@@ -125,6 +136,38 @@ export class StudioController {
       throw new BadRequestException(
         "Only PNG, JPEG, and WebP images are accepted.",
       );
+
+    // If Cloudinary credentials are provided, upload to Cloudinary CDN
+    if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY) {
+      const uploadResult = await new Promise<UploadApiResponse>(
+        (resolvePromise, rejectPromise) => {
+          const stream = cloudinary.uploader.upload_stream(
+            {
+              folder: "dreamtopia/proofs",
+              resource_type: "image",
+            },
+            (err: unknown, result?: UploadApiResponse) => {
+              if (err || !result) {
+                return rejectPromise(err || new Error("Cloudinary upload failed"));
+              }
+              resolvePromise(result);
+            },
+          );
+          streamifier.createReadStream(file.buffer).pipe(stream);
+        },
+      );
+
+      return await this.db.paymentProof.create({
+        data: {
+          userId: r.user.id,
+          filename: uploadResult.secure_url,
+          mime,
+        },
+        select: { id: true, mime: true },
+      });
+    }
+
+    // Fallback: Local disk storage
     const filename = randomUUID(),
       folder = resolve(process.env.UPLOAD_DIR || "./uploads");
     await mkdir(folder, { recursive: true });
@@ -150,6 +193,13 @@ export class StudioController {
     if (!p) throw new NotFoundException();
     if (r.user.role !== "ADMIN" && p.userId !== r.user.id)
       throw new ForbiddenException();
+
+    // If stored on Cloudinary (starts with http/https), redirect or pipe directly
+    if (p.filename.startsWith("http://") || p.filename.startsWith("https://")) {
+      return res.redirect(p.filename);
+    }
+
+    // Local file fallback
     res.setHeader("Content-Type", p.mime);
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("Content-Disposition", "inline");
